@@ -62,7 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let commit_msg = if commit_msg.is_empty() { &summary } else { commit_msg };
 
-            let signature = Signature::now("Your Name", "your.email@example.com")?;
+            let signature = Signature::now("Henry Zhang", "hello@zhanghe.dev")?;
             let tree_id = index.write_tree()?;
             let tree = repo.find_tree(tree_id)?;
             let parent_commit = repo.head()?.peel_to_commit()?;
