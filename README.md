@@ -1,126 +1,85 @@
-# Git Commit Analyzer
+# Git Commit Analyzer (git-ca)
 
-Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically generate meaningful commit messages based on your staged changes. It supports both local (Ollama) and remote (Groq) AI models to analyze git diffs and propose commit messages following the Git Flow format.
+[中文版本 (Chinese Version)](README-cn.md) | [Developer Documentation](README-dev.md)
 
-## Features
+Git Commit Analyzer (git-ca) is a powerful Git plugin that utilizes AI technology to automatically generate meaningful commit messages based on your staged changes. Whether you're a programming novice or an experienced developer, this tool will make your Git workflow more efficient.
 
-- Automatic generation of Git Flow compliant commit messages
-- Support for multiple AI providers (Ollama and Groq)
-- Interactive mode allowing users to choose AI provider, use, edit, or cancel the proposed commit message
-- Cross-platform compatibility (Linux, macOS, Windows)
-- Customizable with your personal Git signature
+## 🌟 Features
 
-## Prerequisites
+- 🤖 Automatically generates commit messages compliant with Git Flow conventions
+- 🔄 Supports multiple AI providers (local Ollama and remote Groq)
+- 🖥️ Interactive mode allowing you to choose AI providers, use, edit, or cancel suggested commit messages
+- 🌍 Cross-platform compatibility (Linux, macOS, Windows)
+- 🎨 Customizable with your personal Git signature
 
-- Git (version 2.0 or later)
-- Rust (version 1.54 or later)
-- Cargo (usually comes with Rust)
-- Ollama (with llama3.1 model installed) for local AI processing
+## 📋 Prerequisites
+
+Before you begin, ensure you have the following software installed on your system:
+
+- [Git](https://git-scm.com/downloads) (version 2.0 or higher)
+- [Ollama](https://ollama.ai/download) (with llama3.1 model installed) - for local AI processing
 - Groq API key (optional, for using Groq's remote AI model)
 
-## Installation
+## 🚀 Installation Guide
 
-### Linux and macOS
+We provide a convenient installation script that works on Linux, macOS, and Windows (Git Bash).
 
-1. Clone the repository:
-   ```
-   git clone https://github.com/zh30/git-commit-analyzer.git
-   cd git-commit-analyzer
-   ```
+### For Linux and macOS Users
 
-2. Build the project:
-   ```
-   cargo build --release
-   ```
+Open a terminal and run the following command:
 
-3. Create a directory for Git plugins (if it doesn't exist):
-   ```
-   mkdir -p ~/.git-plugins
-   ```
-
-4. Copy the compiled binary to the plugins directory:
-   ```
-   cp target/release/git-commit-analyzer ~/.git-plugins/
-   ```
-
-5. Add the plugins directory to your PATH. Add the following line to your `~/.bashrc`, `~/.bash_profile`, or `~/.zshrc` (depending on your shell):
-   ```
-   export PATH="$HOME/.git-plugins:$PATH"
-   ```
-
-6. Reload your shell configuration:
-   ```
-   source ~/.bashrc  # or ~/.bash_profile, or ~/.zshrc
-   ```
-
-7. If you plan to use Groq, set up the API key as an environment variable:
-   ```
-   echo 'export GROQ_API_KEY=your_groq_api_key_here' >> ~/.bashrc  # or ~/.bash_profile, or ~/.zshrc
-   source ~/.bashrc  # or ~/.bash_profile, or ~/.zshrc
-   ```
-
-### Windows - theoretically possible 
-
-1. Clone the repository:
-   ```
-   git clone https://github.com/zh30/git-commit-analyzer.git
-   cd git-commit-analyzer
-   ```
-
-2. Build the project:
-   ```
-   cargo build --release
-   ```
-
-3. Create a directory for Git plugins (if it doesn't exist):
-   ```
-   mkdir %USERPROFILE%\.git-plugins
-   ```
-
-4. Copy the compiled binary to the plugins directory:
-   ```
-   copy target\release\git-commit-analyzer.exe %USERPROFILE%\.git-plugins\
-   ```
-
-5. Add the plugins directory to your PATH:
-   - Right-click on 'This PC' or 'My Computer' and select 'Properties'
-   - Click on 'Advanced system settings'
-   - Click on 'Environment Variables'
-   - Under 'System variables', find and select 'Path', then click 'Edit'
-   - Click 'New' and add `%USERPROFILE%\.git-plugins`
-   - Click 'OK' to close all dialogs
-
-6. If you plan to use Groq, set up the API key as an environment variable:
-   - In the same 'Environment Variables' dialog, under 'User variables', click 'New'
-   - Set Variable name as `GROQ_API_KEY` and Variable value as your Groq API key
-   - Click 'OK' to close all dialogs
-
-7. Restart any open command prompts for the changes to take effect.
-
-## Usage
-
-Once installed, you can use the Git Commit Analyzer in any Git repository by running:
-
-```
-git commit-analyzer
+```bash
+bash <(curl -s https://scripts.zhanghe.dev/git_ca_install.sh)
 ```
 
-This will:
-1. Prompt you to choose an AI provider (Ollama or Groq)
-2. Analyze your staged changes using the selected AI provider
-3. Generate a commit message proposal
-4. Allow you to use the proposed message, edit it, or cancel the commit
+### For Windows Users - TBD (Currently Unavailable)
 
-## Contributing
+1. Download the [install.bat](https://scripts.zhanghe.dev/git_ca_install.bat) file.
+2. Double-click to run the `install.bat` file.
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+The installation script will automatically download the `git-ca` executable and place it in the appropriate location. For Unix-like systems, it will also add it to your PATH automatically.
 
-## License
+### Manual Setup of Groq API Key (Optional)
+
+If you plan to use Groq as an AI provider, you need to set up the Groq API key:
+
+- **For Linux and macOS**:
+  ```bash
+  echo 'export GROQ_API_KEY=your_groq_api_key' >> ~/.bashrc
+  source ~/.bashrc
+  ```
+
+- **For Windows**:
+  Run in Command Prompt:
+  ```
+  setx GROQ_API_KEY "your_groq_api_key"
+  ```
+
+## 🎯 How to Use
+
+After installation, you can use Git Commit Analyzer in any Git repository:
+
+1. Stage your changes in your Git repository (using the `git add` command).
+2. Run the following command:
+
+   ```
+   git-ca
+   ```
+
+3. Follow the prompts to select an AI provider (Ollama or Groq).
+4. The program will analyze your staged changes and generate a suggested commit message.
+5. You can choose to use the suggested message, edit it, or cancel the commit.
+
+## 🤝 Contributing
+
+We welcome contributions of any kind! If you have good ideas or find bugs, feel free to submit a Pull Request or create an Issue.
+
+## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Acknowledgments
+## 🙏 Acknowledgements
 
-- The Rust community for providing excellent libraries and tools
+- The Rust community for excellent libraries and tools
 - Ollama for providing the llama3.1 model
 - Groq for their API service
