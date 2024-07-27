@@ -1,27 +1,22 @@
 # Git Commit Analyzer
 
-Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically generate meaningful commit messages based on your staged changes. It uses the llama3.1 model to analyze git diffs and propose commit messages following the Git Flow format.
+Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically generate meaningful commit messages based on your staged changes. It supports both local (Ollama) and remote (Groq) AI models to analyze git diffs and propose commit messages following the Git Flow format.
 
 ## Features
 
-- Git Commit Analyzer
-  - Features
-  - Prerequisites
-  - Installation
-    - Linux and macOS
-    - Windows - theoretically possible
-  - Usage
-  - Customization
-  - Contributing
-  - License
-  - Acknowledgments
+- Automatic generation of Git Flow compliant commit messages
+- Support for multiple AI providers (Ollama and Groq)
+- Interactive mode allowing users to choose AI provider, use, edit, or cancel the proposed commit message
+- Cross-platform compatibility (Linux, macOS, Windows)
+- Customizable with your personal Git signature
 
 ## Prerequisites
 
 - Git (version 2.0 or later)
 - Rust (version 1.54 or later)
 - Cargo (usually comes with Rust)
-- Ollama (with llama3.1 model installed)
+- Ollama (with llama3.1 model installed) for local AI processing
+- Groq API key (optional, for using Groq's remote AI model)
 
 ## Installation
 
@@ -58,6 +53,12 @@ Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically 
    source ~/.bashrc  # or ~/.bash_profile, or ~/.zshrc
    ```
 
+7. If you plan to use Groq, set up the API key as an environment variable:
+   ```
+   echo 'export GROQ_API_KEY=your_groq_api_key_here' >> ~/.bashrc  # or ~/.bash_profile, or ~/.zshrc
+   source ~/.bashrc  # or ~/.bash_profile, or ~/.zshrc
+   ```
+
 ### Windows - theoretically possible 
 
 1. Clone the repository:
@@ -89,7 +90,12 @@ Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically 
    - Click 'New' and add `%USERPROFILE%\.git-plugins`
    - Click 'OK' to close all dialogs
 
-6. Restart any open command prompts for the changes to take effect.
+6. If you plan to use Groq, set up the API key as an environment variable:
+   - In the same 'Environment Variables' dialog, under 'User variables', click 'New'
+   - Set Variable name as `GROQ_API_KEY` and Variable value as your Groq API key
+   - Click 'OK' to close all dialogs
+
+7. Restart any open command prompts for the changes to take effect.
 
 ## Usage
 
@@ -100,9 +106,10 @@ git commit-analyzer
 ```
 
 This will:
-1. Analyze your staged changes
-2. Generate a commit message proposal
-3. Allow you to use the proposed message, edit it, or cancel the commit
+1. Prompt you to choose an AI provider (Ollama or Groq)
+2. Analyze your staged changes using the selected AI provider
+3. Generate a commit message proposal
+4. Allow you to use the proposed message, edit it, or cancel the commit
 
 ## Customization
 
@@ -126,3 +133,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - The Rust community for providing excellent libraries and tools
 - Ollama for providing the llama3.1 model
+- Groq for their API service
