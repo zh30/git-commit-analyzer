@@ -1,6 +1,5 @@
 use std::process::Command;
 use std::io::{self, Write};
-use std::time::Duration;
 use reqwest::blocking::Client;
 use serde_json::json;
 use git2::{Repository, IndexAddOption, Signature};
@@ -15,15 +14,32 @@ fn get_diff() -> Result<String, Box<dyn std::error::Error>> {
 }
 
 fn analyze_diff(diff: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let client = Client::builder()
-        .timeout(Duration::from_secs(30))  // 设置 30 秒超时
-        .build()?;
+    let client = Client::new();
+    let prompt = format!(
+        "Analyze this git diff and provide a commit message following the Git Flow format:
+
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+
+Where:
+- <type> is one of: feat, fix, docs, style, refactor, test, chore
+- <scope> is optional and represents the module affected
+- <subject> is a short description in the imperative mood
+- <body> provides detailed description (optional)
+- <footer> mentions any breaking changes or closed issues (optional)
+
+Here's the diff to analyze:
+
+{}
+
+Please provide only the formatted commit message, without any additional explanations.", diff);
     
-    let prompt = format!("Analyze this git diff and provide a concise summary of the changes:\n\n{}", diff);
-    println!("Prompt: {}", prompt);
     let response = client.post(format!("{}/generate", OLLAMA_API_BASE))
         .json(&json!({
-            "model": "qwen2:1.5b",
+            "model": "codegemma:2b",
             "prompt": prompt,
             "stream": false
         }))
@@ -47,53 +63,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let diff = get_diff()?;
-    
-    match analyze_diff(&diff) {
-        Ok(summary) => {
-            println!("\nAnalyzed changes:");
-            println!("{}", summary);
+    let summary = analyze_diff(&diff)?;
 
-            print!("\nEnter commit message (press Enter to use the analysis as the commit message): ");
-            io::stdout().flush()?;
+    println!("\nProposed commit message:");
+    println!("{}", summary);
 
-            let mut commit_msg = String::new();
-            io::stdin().read_line(&mut commit_msg)?;
-            let commit_msg = commit_msg.trim();
+    print!("\nDo you want to use this message? (Y/n): ");
+    io::stdout().flush()?;
 
-            let commit_msg = if commit_msg.is_empty() { &summary } else { commit_msg };
+    let mut response = String::new();
+    io::stdin().read_line(&mut response)?;
+    let response = response.trim().to_lowercase();
 
-            let signature = Signature::now("Henry Zhang", "hello@zhanghe.dev")?;
-            let tree_id = index.write_tree()?;
-            let tree = repo.find_tree(tree_id)?;
-            let parent_commit = repo.head()?.peel_to_commit()?;
+    let commit_msg = if response.is_empty() || response == "y" {
+        summary
+    } else {
+        print!("Enter your commit message: ");
+        io::stdout().flush()?;
+        let mut custom_msg = String::new();
+        io::stdin().read_line(&mut custom_msg)?;
+        custom_msg.trim().to_string()
+    };
 
-            repo.commit(Some("HEAD"), &signature, &signature, commit_msg, &tree, &[&parent_commit])?;
+    let signature = Signature::now("Henry Zhang", "hello@zhanghe.dev")?;
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+    let parent_commit = repo.head()?.peel_to_commit()?;
 
-            println!("\nChanges committed successfully.");
-        },
-        Err(e) => {
-            eprintln!("Error analyzing diff: {}. Proceeding with manual commit.", e);
-            print!("Enter commit message: ");
-            io::stdout().flush()?;
+    repo.commit(Some("HEAD"), &signature, &signature, &commit_msg, &tree, &[&parent_commit])?;
 
-            let mut commit_msg = String::new();
-            io::stdin().read_line(&mut commit_msg)?;
-            let commit_msg = commit_msg.trim();
-
-            if !commit_msg.is_empty() {
-                let signature = Signature::now("Your Name", "your.email@example.com")?;
-                let tree_id = index.write_tree()?;
-                let tree = repo.find_tree(tree_id)?;
-                let parent_commit = repo.head()?.peel_to_commit()?;
-
-                repo.commit(Some("HEAD"), &signature, &signature, commit_msg, &tree, &[&parent_commit])?;
-
-                println!("\nChanges committed successfully.");
-            } else {
-                println!("No commit message provided. Aborting commit.");
-            }
-        }
-    }
+    println!("\nChanges committed successfully.");
 
     Ok(())
 }
