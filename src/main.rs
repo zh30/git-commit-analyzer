@@ -1,10 +1,17 @@
 use std::process::Command;
 use std::io::{self, Write};
+use std::env;
 use reqwest::blocking::Client;
 use serde_json::json;
 use git2::{Repository, IndexAddOption, Signature};
 
 const OLLAMA_API_BASE: &str = "http://localhost:11434/api";
+const GROQ_API_BASE: &str = "https://api.groq.com/openai/v1/chat/completions";
+
+enum AIProvider {
+    Ollama,
+    Groq,
+}
 
 fn get_diff() -> Result<String, Box<dyn std::error::Error>> {
     let output = Command::new("git")
@@ -13,7 +20,7 @@ fn get_diff() -> Result<String, Box<dyn std::error::Error>> {
     Ok(String::from_utf8(output.stdout)?)
 }
 
-fn analyze_diff(diff: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn analyze_diff(diff: &str, provider: AIProvider) -> Result<String, Box<dyn std::error::Error>> {
     let client = Client::new();
     let prompt = format!(
         "Analyze this git diff and provide a commit message following the Git Flow format:
@@ -36,20 +43,41 @@ Here's the diff to analyze:
 {}
 
 Please provide only the formatted commit message, without any additional explanations or markdown formatting.", diff);
-    
-    let response = client.post(format!("{}/generate", OLLAMA_API_BASE))
-        .json(&json!({
-            "model": "llama3.1",
-            "prompt": prompt,
-            "stream": false
-        }))
-        .send()?;
 
-    if response.status().is_success() {
-        let result: serde_json::Value = response.json()?;
-        Ok(result["response"].as_str().unwrap_or("").trim().to_string())
-    } else {
-        Err(format!("Error: Unable to get response from Ollama. Status code: {}", response.status()).into())
+    match provider {
+        AIProvider::Ollama => {
+            let response = client.post(format!("{}/generate", OLLAMA_API_BASE))
+                .json(&json!({
+                    "model": "llama3.1",
+                    "prompt": prompt,
+                    "stream": false
+                }))
+                .send()?;
+
+            if response.status().is_success() {
+                let result: serde_json::Value = response.json()?;
+                Ok(result["response"].as_str().unwrap_or("").trim().to_string())
+            } else {
+                Err(format!("Error: Unable to get response from Ollama. Status code: {}", response.status()).into())
+            }
+        },
+        AIProvider::Groq => {
+            let groq_api_key = env::var("GROQ_API_KEY").expect("GROQ_API_KEY not set");
+            let response = client.post(GROQ_API_BASE)
+                .header("Authorization", format!("Bearer {}", groq_api_key))
+                .json(&json!({
+                    "model": "llama-3.1-8b-instant",
+                    "messages": [{"role": "user", "content": prompt}]
+                }))
+                .send()?;
+
+            if response.status().is_success() {
+                let result: serde_json::Value = response.json()?;
+                Ok(result["choices"][0]["message"]["content"].as_str().unwrap_or("").trim().to_string())
+            } else {
+                Err(format!("Error: Unable to get response from Groq. Status code: {}", response.status()).into())
+            }
+        }
     }
 }
 
@@ -71,7 +99,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let diff = get_diff()?;
-    let mut commit_msg = analyze_diff(&diff)?;
+
+    let provider = match get_user_input("Choose AI provider (1: Ollama, 2: Groq): ")?.as_str() {
+        "1" => AIProvider::Ollama,
+        "2" => AIProvider::Groq,
+        _ => {
+            println!("Invalid choice. Using Ollama as default.");
+            AIProvider::Ollama
+        }
+    };
+
+    let mut commit_msg = analyze_diff(&diff, provider)?;
 
     loop {
         println!("\nProposed commit message:");
