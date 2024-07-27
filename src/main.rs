@@ -35,11 +35,11 @@ Here's the diff to analyze:
 
 {}
 
-Please provide only the formatted commit message, without any additional explanations.", diff);
+Please provide only the formatted commit message, without any additional explanations or markdown formatting.", diff);
     
     let response = client.post(format!("{}/generate", OLLAMA_API_BASE))
         .json(&json!({
-            "model": "codegemma:2b",
+            "model": "llama3.1",
             "prompt": prompt,
             "stream": false
         }))
@@ -47,10 +47,18 @@ Please provide only the formatted commit message, without any additional explana
 
     if response.status().is_success() {
         let result: serde_json::Value = response.json()?;
-        Ok(result["response"].as_str().unwrap_or("").to_string())
+        Ok(result["response"].as_str().unwrap_or("").trim().to_string())
     } else {
         Err(format!("Error: Unable to get response from Ollama. Status code: {}", response.status()).into())
     }
+}
+
+fn get_user_input(prompt: &str) -> io::Result<String> {
+    print!("{}", prompt);
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(input.trim().to_string())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -63,27 +71,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let diff = get_diff()?;
-    let summary = analyze_diff(&diff)?;
+    let mut commit_msg = analyze_diff(&diff)?;
 
-    println!("\nProposed commit message:");
-    println!("{}", summary);
+    loop {
+        println!("\nProposed commit message:");
+        println!("{}", commit_msg);
 
-    print!("\nDo you want to use this message? (Y/n): ");
-    io::stdout().flush()?;
+        let choice = get_user_input("\nDo you want to (u)se this message, (e)dit it, or (c)ancel? [u/e/c]: ")?;
 
-    let mut response = String::new();
-    io::stdin().read_line(&mut response)?;
-    let response = response.trim().to_lowercase();
-
-    let commit_msg = if response.is_empty() || response == "y" {
-        summary
-    } else {
-        print!("Enter your commit message: ");
-        io::stdout().flush()?;
-        let mut custom_msg = String::new();
-        io::stdin().read_line(&mut custom_msg)?;
-        custom_msg.trim().to_string()
-    };
+        match choice.to_lowercase().as_str() {
+            "u" => break,
+            "e" => {
+                commit_msg = get_user_input("Enter your commit message (use multiple lines if needed, end with an empty line):\n")?;
+                break;
+            },
+            "c" => {
+                println!("Commit cancelled.");
+                return Ok(());
+            },
+            _ => println!("Invalid choice. Please try again."),
+        }
+    }
 
     let signature = Signature::now("Henry Zhang", "hello@zhanghe.dev")?;
     let tree_id = index.write_tree()?;
@@ -93,6 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     repo.commit(Some("HEAD"), &signature, &signature, &commit_msg, &tree, &[&parent_commit])?;
 
     println!("\nChanges committed successfully.");
+    println!("Commit message:\n{}", commit_msg);
 
     Ok(())
 }
