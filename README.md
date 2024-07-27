@@ -111,16 +111,6 @@ This will:
 3. Generate a commit message proposal
 4. Allow you to use the proposed message, edit it, or cancel the commit
 
-## Customization
-
-To customize the Git signature used in commits, modify the following line in `src/main.rs`:
-
-```rust
-let signature = Signature::now("Your Name", "your.email@example.com")?;
-```
-
-Replace "Your Name" and "your.email@example.com" with your name and email address.
-
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
