@@ -1,4 +1,4 @@
-use git2::{IndexAddOption, Repository, Signature, Config};
+use git2::{Config, IndexAddOption, Repository, Signature};
 use reqwest::blocking::Client;
 use serde_json::json;
 use std::env;
@@ -20,7 +20,7 @@ fn get_diff() -> Result<String, Box<dyn std::error::Error>> {
 
 fn analyze_diff(diff: &str, provider: AIProvider) -> Result<String, Box<dyn std::error::Error>> {
     let client = Client::new();
-    let prompt = format!(
+    let base_prompt = format!(
         "Analyze this git diff and provide a commit message following the Git Flow format:
 
 <type>(<scope>): <subject>
@@ -40,7 +40,35 @@ Here's the diff to analyze:
 
 {}
 
-Please provide only the formatted commit message, without any additional explanations or markdown formatting.", diff);
+",
+        diff
+    );
+
+    let ollama_prompt = format!(
+        "{}
+
+Your task:
+1. Analyze the given git diff.
+2. Generate a commit message strictly following the Git Flow format described above.
+3. Ensure your response contains ONLY the formatted commit message, without any additional explanations or markdown.
+4. The commit message MUST start with <type> and follow the exact structure shown.
+
+Example of a valid response:
+feat(user-auth): implement password reset functionality
+
+Add a new endpoint for password reset requests.
+Implement email sending for reset links.
+
+Closes #123",
+        base_prompt
+    );
+
+    let groq_prompt = format!(
+        "{}
+
+Please provide only the formatted commit message, without any additional explanations or markdown formatting.",
+        base_prompt
+    );
 
     match provider {
         AIProvider::Ollama => {
@@ -48,7 +76,7 @@ Please provide only the formatted commit message, without any additional explana
                 .post(format!("{}/generate", OLLAMA_API_BASE))
                 .json(&json!({
                     "model": "llama3.1",
-                    "prompt": prompt,
+                    "prompt": ollama_prompt,
                     "stream": false
                 }))
                 .send()?;
@@ -71,7 +99,7 @@ Please provide only the formatted commit message, without any additional explana
                 .header("Authorization", format!("Bearer {}", groq_api_key))
                 .json(&json!({
                     "model": "llama-3.1-8b-instant",
-                    "messages": [{"role": "user", "content": prompt}]
+                    "messages": [{"role": "user", "content": groq_prompt}]
                 }))
                 .send()?;
 
