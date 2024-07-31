@@ -3,6 +3,7 @@ use reqwest::blocking::Client;
 use serde_json::json;
 use std::env;
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::process::Command;
 
 const OLLAMA_API_BASE: &str = "http://localhost:11434/api";
@@ -11,6 +12,19 @@ const GROQ_API_BASE: &str = "https://api.groq.com/openai/v1/chat/completions";
 enum AIProvider {
     Ollama,
     Groq,
+}
+
+fn find_git_repository(start_path: &PathBuf) -> Option<PathBuf> {
+    let mut current_path = start_path.clone();
+    loop {
+        let git_dir = current_path.join(".git");
+        if git_dir.is_dir() {
+            return Some(current_path);
+        }
+        if !current_path.pop() {
+            return None;
+        }
+    }
 }
 
 fn get_diff() -> Result<String, Box<dyn std::error::Error>> {
@@ -158,8 +172,14 @@ fn get_or_set_user_info(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let repo = Repository::open(".")?;
+    let current_dir = std::env::current_dir()?;
+    let repo_path =
+        find_git_repository(&current_dir).ok_or_else(|| "Not in a git repository".to_string())?;
+
+    let repo = Repository::open(repo_path)?;
     let mut index = repo.index()?;
+
+    std::env::set_current_dir(&repo.path().parent().unwrap())?;
 
     if index
         .add_all(&["*"], IndexAddOption::DEFAULT, None)
