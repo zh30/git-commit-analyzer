@@ -66,6 +66,7 @@ Your task:
 2. Generate a commit message strictly following the Git Flow format described above.
 3. Ensure your response contains ONLY the formatted commit message, without any additional explanations or markdown.
 4. The commit message MUST start with <type> and follow the exact structure shown.
+5. DO NOT include any 'Fixes #XXX' or 'Closes #XXX' statements unless explicitly mentioned in the diff or you are absolutely certain about the issue number.
 
 Example of a valid response:
 feat(user-auth): implement password reset functionality
@@ -73,14 +74,23 @@ feat(user-auth): implement password reset functionality
 Add a new endpoint for password reset requests.
 Implement email sending for reset links.
 
-Closes #123",
+Example of a valid response with a footer (only if you're certain about the issue):
+fix(upload-ui): correct file size validation
+
+Update file size validation logic to handle edge cases.
+Improve error messaging for invalid file sizes.
+
+Fixes #456  (include this line ONLY if the issue number is explicitly mentioned in the diff)
+
+Remember: If you're not 100% sure about an issue number, DO NOT include a 'Fixes #XXX' line.",
         base_prompt
     );
 
     let groq_prompt = format!(
         "{}
 
-Please provide only the formatted commit message, without any additional explanations or markdown formatting.",
+Please provide only the formatted commit message, without any additional explanations or markdown formatting. 
+Important: Do not include 'Fixes #XXX' or 'Closes #XXX' unless the issue number is explicitly mentioned in the diff.",
         base_prompt
     );
 
