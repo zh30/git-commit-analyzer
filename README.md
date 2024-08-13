@@ -105,7 +105,7 @@ After installation, you can use Git Commit Analyzer in any Git repository:
 2. Run the following command:
 
    ```
-   git-ca
+   git ca
    ```
 
 3. Follow the prompts to select an AI provider (Ollama or Groq).
