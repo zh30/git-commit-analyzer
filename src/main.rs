@@ -5,6 +5,7 @@ use std::env;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
 
 const OLLAMA_API_BASE: &str = "http://localhost:11434/api";
 const GROQ_API_BASE: &str = "https://api.groq.com/openai/v1/chat/completions";
@@ -41,14 +42,11 @@ fn analyze_diff(diff: &str, provider: AIProvider) -> Result<String, Box<dyn std:
 
 <body>
 
-<footer>
-
 Where:
 - <type> is one of: feat, fix, docs, style, refactor, test, chore
 - <scope> is optional and represents the module affected
 - <subject> is a short description in the imperative mood
 - <body> provides detailed description (optional)
-- <footer> mentions any breaking changes or closed issues (optional)
 
 Here's the diff to analyze:
 
@@ -66,7 +64,9 @@ Your task:
 2. Generate a commit message strictly following the Git Flow format described above.
 3. Ensure your response contains ONLY the formatted commit message, without any additional explanations or markdown.
 4. The commit message MUST start with <type> and follow the exact structure shown.
-5. DO NOT include any 'Fixes #XXX' or 'Closes #XXX' statements unless explicitly mentioned in the diff or you are absolutely certain about the issue number.
+5. DO NOT include any 'Fixes #XXX' or 'Closes #XXX' statements, or any footer.
+6. DO NOT mention or reference any issue numbers.
+7. Focus solely on the changes present in the diff.
 
 Example of a valid response:
 feat(user-auth): implement password reset functionality
@@ -74,15 +74,7 @@ feat(user-auth): implement password reset functionality
 Add a new endpoint for password reset requests.
 Implement email sending for reset links.
 
-Example of a valid response with a footer (only if you're certain about the issue):
-fix(upload-ui): correct file size validation
-
-Update file size validation logic to handle edge cases.
-Improve error messaging for invalid file sizes.
-
-Fixes #456  (include this line ONLY if the issue number is explicitly mentioned in the diff)
-
-Remember: If you're not 100% sure about an issue number, DO NOT include a 'Fixes #XXX' line.",
+Remember: Your response should only include the commit message, nothing else.",
         base_prompt
     );
 
@@ -107,7 +99,10 @@ Important: Do not include 'Fixes #XXX' or 'Closes #XXX' unless the issue number 
 
             if response.status().is_success() {
                 let result: serde_json::Value = response.json()?;
-                Ok(result["response"].as_str().unwrap_or("").trim().to_string())
+                let raw_message = result["response"].as_str().unwrap_or("").trim().to_string();
+
+                // 对 Ollama 的响应进行后处理
+                Ok(process_ollama_response(&raw_message))
             } else {
                 Err(format!(
                     "Error: Unable to get response from Ollama. Status code: {}",
@@ -143,6 +138,37 @@ Important: Do not include 'Fixes #XXX' or 'Closes #XXX' unless the issue number 
             }
         }
     }
+}
+
+fn process_ollama_response(response: &str) -> String {
+    // 移除任何 "Fixes #XXX" 或 "Closes #XXX" 行
+    let lines: Vec<&str> = response
+        .lines()
+        .filter(|line| !line.starts_with("Fixes #") && !line.starts_with("Closes #"))
+        .collect();
+
+    // 确保只返回符合 Git Flow 格式的内容
+    let mut processed_lines = Vec::new();
+    let mut started = false;
+
+    for line in lines {
+        if !started
+            && (line.starts_with("feat")
+                || line.starts_with("fix")
+                || line.starts_with("docs")
+                || line.starts_with("style")
+                || line.starts_with("refactor")
+                || line.starts_with("test")
+                || line.starts_with("chore"))
+        {
+            started = true;
+        }
+        if started {
+            processed_lines.push(line);
+        }
+    }
+
+    processed_lines.join("\n")
 }
 
 fn get_user_input(prompt: &str) -> io::Result<String> {
@@ -181,6 +207,29 @@ fn get_or_set_user_info(
     }
 }
 
+fn is_ollama_running() -> Result<bool, Box<dyn std::error::Error>> {
+    let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
+
+    let response = client.get(format!("{}/tags", OLLAMA_API_BASE)).send()?;
+
+    if response.status().is_success() {
+        let data: serde_json::Value = response.json()?;
+
+        if let Some(models) = data["models"].as_array() {
+            for model in models {
+                if let Some(name) = model["name"].as_str() {
+                    // 检查模型名称是否包含 "llama" 和 "3.1"
+                    if name.to_lowercase().contains("llama") && name.contains("3.1") {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(false)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let current_dir = std::env::current_dir()?;
     let repo_path =
@@ -201,12 +250,61 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let diff = get_diff()?;
 
-    let provider = match get_user_input("Choose AI provider (1: Ollama, 2: Groq): ")?.as_str() {
-        "1" => AIProvider::Ollama,
-        "2" => AIProvider::Groq,
-        _ => {
-            println!("Invalid choice. Using Ollama as default.");
-            AIProvider::Ollama
+    let provider = if env::var("GROQ_API_KEY").is_ok() {
+        match get_user_input("Choose AI provider (1: Ollama, 2: Groq): ")?.as_str() {
+            "1" => match is_ollama_running() {
+                Ok(true) => AIProvider::Ollama,
+                Ok(false) => {
+                    println!("Warning: Ollama is running, but llama 3.1 model is not available.");
+                    println!("Falling back to Groq...");
+                    AIProvider::Groq
+                }
+                Err(e) => {
+                    println!(
+                        "Error checking Ollama status: {}. Falling back to Groq...",
+                        e
+                    );
+                    AIProvider::Groq
+                }
+            },
+            "2" => AIProvider::Groq,
+            _ => {
+                println!("Invalid choice. Attempting to use Ollama...");
+                match is_ollama_running() {
+                    Ok(true) => AIProvider::Ollama,
+                    Ok(false) => {
+                        println!(
+                            "Warning: Ollama is running, but llama 3.1 model is not available."
+                        );
+                        println!("Falling back to Groq...");
+                        AIProvider::Groq
+                    }
+                    Err(e) => {
+                        println!(
+                            "Error checking Ollama status: {}. Falling back to Groq...",
+                            e
+                        );
+                        AIProvider::Groq
+                    }
+                }
+            }
+        }
+    } else {
+        println!("GROQ_API_KEY not set. Attempting to use Ollama...");
+        match is_ollama_running() {
+            Ok(true) => AIProvider::Ollama,
+            Ok(false) => {
+                println!("Error: Ollama is running, but llama 3.1 model is not available.");
+                println!(
+                    "Please install llama 3.1 model for Ollama, or set GROQ_API_KEY to use Groq."
+                );
+                return Err("No available AI provider".into());
+            }
+            Err(e) => {
+                println!("Error checking Ollama status: {}.", e);
+                println!("Please ensure Ollama is running with llama 3.1 model, or set GROQ_API_KEY to use Groq.");
+                return Err("No available AI provider".into());
+            }
         }
     };
 
