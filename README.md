@@ -56,6 +56,7 @@ Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically 
 7. If you plan to use Groq, set up the API key as an environment variable:
    ```
    echo 'export GROQ_API_KEY=your_groq_api_key_here' >> ~/.bashrc  # or ~/.bash_profile, or ~/.zshrc
+   echo 'export CEREBRAS_API_KEY=your_cerebras_api_key_here' >> ~/.bashrc  # or ~/.bash_profile, or ~/.zshrc
    source ~/.bashrc  # or ~/.bash_profile, or ~/.zshrc
    ```
 
@@ -93,6 +94,7 @@ Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically 
 6. If you plan to use Groq, set up the API key as an environment variable:
    - In the same 'Environment Variables' dialog, under 'User variables', click 'New'
    - Set Variable name as `GROQ_API_KEY` and Variable value as your Groq API key
+   - Set Variable name as `CEREBRAS_API_KEY` and Variable value as your Cerebras API key
    - Click 'OK' to close all dialogs
 
 7. Restart any open command prompts for the changes to take effect.
