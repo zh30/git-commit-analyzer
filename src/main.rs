@@ -9,10 +9,11 @@ use std::time::Duration;
 
 const OLLAMA_API_BASE: &str = "http://localhost:11434/api";
 const GROQ_API_BASE: &str = "https://api.groq.com/openai/v1/chat/completions";
-
+const CEREBRAS_API_BASE: &str = "https://api.cerebras.ai/v1/chat/completions";
 enum AIProvider {
     Ollama,
     Groq,
+    Cerebras,
 }
 
 fn find_git_repository(start_path: &PathBuf) -> Option<PathBuf> {
@@ -137,6 +138,32 @@ Important: Do not include 'Fixes #XXX' or 'Closes #XXX' unless the issue number 
                 .into())
             }
         }
+        AIProvider::Cerebras => {
+            let cerebras_api_key = env::var("CEREBRAS_API_KEY").expect("CEREBRAS_API_KEY not set");
+            let response = client
+                .post(CEREBRAS_API_BASE)
+                .header("Authorization", format!("Bearer {}", cerebras_api_key))
+                .json(&json!({
+                    "model": "llama3.1-70b",
+                    "messages": [{"role": "user", "content": groq_prompt}]
+                }))
+                .send()?;
+
+            if response.status().is_success() {
+                let result: serde_json::Value = response.json()?;
+                Ok(result["choices"][0]["message"]["content"]
+                    .as_str()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string())
+            } else {
+                Err(format!(
+                    "Error: Unable to get response from Cerebras. Status code: {}",
+                    response.status()
+                )
+                .into())
+            }
+        }
     }
 }
 
@@ -250,63 +277,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let diff = get_diff()?;
 
-    let provider = if env::var("GROQ_API_KEY").is_ok() {
-        match get_user_input("Choose AI provider (1: Ollama, 2: Groq): ")?.as_str() {
-            "1" => match is_ollama_running() {
-                Ok(true) => AIProvider::Ollama,
-                Ok(false) => {
-                    println!("Warning: Ollama is running, but llama 3.1 model is not available.");
-                    println!("Falling back to Groq...");
-                    AIProvider::Groq
-                }
-                Err(e) => {
-                    println!(
-                        "Error checking Ollama status: {}. Falling back to Groq...",
-                        e
-                    );
-                    AIProvider::Groq
-                }
-            },
-            "2" => AIProvider::Groq,
+    let provider = if env::var("GROQ_API_KEY").is_ok() || env::var("CEREBRAS_API_KEY").is_ok() {
+        match get_user_input("Choose AI provider (1: Ollama, 2: Groq, 3: Cerebras): ")?.as_str() {
+            "1" => check_ollama_and_fallback(),
+            "2" if env::var("GROQ_API_KEY").is_ok() => AIProvider::Groq,
+            "3" if env::var("CEREBRAS_API_KEY").is_ok() => AIProvider::Cerebras,
             _ => {
-                println!("Invalid choice. Attempting to use Ollama...");
-                match is_ollama_running() {
-                    Ok(true) => AIProvider::Ollama,
-                    Ok(false) => {
-                        println!(
-                            "Warning: Ollama is running, but llama 3.1 model is not available."
-                        );
-                        println!("Falling back to Groq...");
-                        AIProvider::Groq
-                    }
-                    Err(e) => {
-                        println!(
-                            "Error checking Ollama status: {}. Falling back to Groq...",
-                            e
-                        );
-                        AIProvider::Groq
-                    }
-                }
+                println!("Invalid choice or API key not set. Attempting to use Ollama...");
+                check_ollama_and_fallback()
             }
         }
     } else {
-        println!("GROQ_API_KEY not set. Attempting to use Ollama...");
+        println!("No API keys set. Attempting to use Ollama...");
+        check_ollama_and_fallback()
+    };
+
+    fn check_ollama_and_fallback() -> AIProvider {
         match is_ollama_running() {
             Ok(true) => AIProvider::Ollama,
             Ok(false) => {
-                println!("Error: Ollama is running, but llama 3.1 model is not available.");
-                println!(
-                    "Please install llama 3.1 model for Ollama, or set GROQ_API_KEY to use Groq."
-                );
-                return Err("No available AI provider".into());
+                println!("Warning: Ollama is running, but llama 3.1 model is not available.");
+                fallback_to_available_provider()
             }
             Err(e) => {
                 println!("Error checking Ollama status: {}.", e);
-                println!("Please ensure Ollama is running with llama 3.1 model, or set GROQ_API_KEY to use Groq.");
-                return Err("No available AI provider".into());
+                fallback_to_available_provider()
             }
         }
-    };
+    }
+
+    fn fallback_to_available_provider() -> AIProvider {
+        if env::var("GROQ_API_KEY").is_ok() {
+            println!("Falling back to Groq...");
+            AIProvider::Groq
+        } else if env::var("CEREBRAS_API_KEY").is_ok() {
+            println!("Falling back to Cerebras...");
+            AIProvider::Cerebras
+        } else {
+            println!("No available AI provider. Please ensure Ollama is running with llama 3.1 model, or set GROQ_API_KEY or CEREBRAS_API_KEY.");
+            panic!("No available AI provider");
+        }
+    }
 
     let mut commit_msg = analyze_diff(&diff, provider)?;
 
