@@ -1,11 +1,13 @@
 # Git Commit Analyzer
 
-Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically generate meaningful commit messages based on your staged changes. It supports both local (Ollama) and remote (Groq) AI models to analyze git diffs and propose commit messages following the Git Flow format.
+[中文版](README_ZH.md)
+
+Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically generate meaningful commit messages based on your staged changes. It supports both local (Ollama) and remote AI models to analyze git diffs and propose commit messages following the Git Flow format.
 
 ## Features
 
 - Automatic generation of Git Flow compliant commit messages
-- Support for multiple AI providers (Ollama and Groq)
+- Support for multiple AI providers (Ollama and Groq and Cerebras)
 - Interactive mode allowing users to choose AI provider, use, edit, or cancel the proposed commit message
 - Cross-platform compatibility (Linux, macOS, Windows)
 - Customizable with your personal Git signature
@@ -17,6 +19,7 @@ Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically 
 - Cargo (usually comes with Rust)
 - Ollama (with llama3.1 model installed) for local AI processing
 - Groq API key (optional, for using Groq's remote AI model)
+- Cerebras API key (optional, for using Cerebras' remote AI model)
 
 ## Installation
 
