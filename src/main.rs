@@ -92,7 +92,7 @@ Important: Do not include 'Fixes #XXX' or 'Closes #XXX' unless the issue number 
             let response = client
                 .post(format!("{}/generate", OLLAMA_API_BASE))
                 .json(&json!({
-                    "model": "llama3.1",
+                    "model": "llama3.2",
                     "prompt": ollama_prompt,
                     "stream": false
                 }))
@@ -118,7 +118,7 @@ Important: Do not include 'Fixes #XXX' or 'Closes #XXX' unless the issue number 
                 .post(GROQ_API_BASE)
                 .header("Authorization", format!("Bearer {}", groq_api_key))
                 .json(&json!({
-                    "model": "llama-3.1-8b-instant",
+                    "model": "llama-3.2-90b-text-preview",
                     "messages": [{"role": "user", "content": groq_prompt}]
                 }))
                 .send()?;
@@ -142,10 +142,15 @@ Important: Do not include 'Fixes #XXX' or 'Closes #XXX' unless the issue number 
             let cerebras_api_key = env::var("CEREBRAS_API_KEY").expect("CEREBRAS_API_KEY not set");
             let response = client
                 .post(CEREBRAS_API_BASE)
+                .header("Content-Type", "application/json")
                 .header("Authorization", format!("Bearer {}", cerebras_api_key))
                 .json(&json!({
                     "model": "llama3.1-70b",
-                    "messages": [{"role": "user", "content": groq_prompt}]
+                    "messages": [{"role": "user", "content": groq_prompt}],
+                    "max_tokens": -1,
+                    "temperature": 0,
+                    "top_p": 1,
+                    "stream": false
                 }))
                 .send()?;
 
