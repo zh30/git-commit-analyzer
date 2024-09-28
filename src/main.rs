@@ -251,7 +251,7 @@ fn is_ollama_running() -> Result<bool, Box<dyn std::error::Error>> {
             for model in models {
                 if let Some(name) = model["name"].as_str() {
                     // 检查模型名称是否包含 "llama" 和 "3.1"
-                    if name.to_lowercase().contains("llama") && name.contains("3.1") {
+                    if name.to_lowercase().contains("llama") && name.contains("3.2") {
                         return Ok(true);
                     }
                 }
