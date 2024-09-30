@@ -49,6 +49,13 @@ Where:
 - <subject> is a short description in the imperative mood
 - <body> provides detailed description (optional)
 
+Important guidelines:
+1. Choose only ONE type that best represents the primary purpose of the changes.
+2. Summarize ALL changes into a single, concise subject line.
+3. Do not include a body or footer in the commit message.
+4. Do not mention or reference any issue numbers.
+5. Focus solely on the most significant change if there are multiple unrelated changes.
+
 Here's the diff to analyze:
 
 {}
@@ -65,9 +72,6 @@ Your task:
 2. Generate a commit message strictly following the Git Flow format described above.
 3. Ensure your response contains ONLY the formatted commit message, without any additional explanations or markdown.
 4. The commit message MUST start with <type> and follow the exact structure shown.
-5. DO NOT include any 'Fixes #XXX' or 'Closes #XXX' statements, or any footer.
-6. DO NOT mention or reference any issue numbers.
-7. Focus solely on the changes present in the diff.
 
 Example of a valid response:
 feat(user-auth): implement password reset functionality
