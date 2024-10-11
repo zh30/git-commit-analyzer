@@ -37,7 +37,7 @@ fn get_diff() -> Result<String, Box<dyn std::error::Error>> {
 fn analyze_diff(diff: &str, provider: AIProvider) -> Result<String, Box<dyn std::error::Error>> {
     let client = Client::new();
     let base_prompt = format!(
-        "Analyze this git diff and provide a commit message following the Git Flow format:
+        "Analyze this git diff and provide a **single** commit message following the Git Flow format:
 
 <type>(<scope>): <subject>
 
@@ -55,6 +55,7 @@ Important guidelines:
 3. Do not include a body or footer in the commit message.
 4. Do not mention or reference any issue numbers.
 5. Focus solely on the most significant change if there are multiple unrelated changes.
+6. **Ensure that only one commit message is generated.**
 
 Here's the diff to analyze:
 
@@ -69,8 +70,8 @@ Here's the diff to analyze:
 
 Your task:
 1. Analyze the given git diff.
-2. Generate a commit message strictly following the Git Flow format described above.
-3. Ensure your response contains ONLY the formatted commit message, without any additional explanations or markdown.
+2. **Generate only one** commit message strictly following the Git Flow format described above.
+3. Ensure your response contains **ONLY** the formatted commit message, without any additional explanations or markdown.
 4. The commit message MUST start with <type> and follow the exact structure shown.
 
 Example of a valid response:
@@ -86,7 +87,7 @@ Remember: Your response should only include the commit message, nothing else.",
     let groq_prompt = format!(
         "{}
 
-Please provide only the formatted commit message, without any additional explanations or markdown formatting. 
+Please provide **only one** formatted commit message, without any additional explanations or markdown formatting. 
 Important: Do not include 'Fixes #XXX' or 'Closes #XXX' unless the issue number is explicitly mentioned in the diff.",
         base_prompt
     );
