@@ -124,8 +124,19 @@ Remember: Your response should only include the commit message, nothing else.",
 }
 
 fn process_ollama_response(response: &str) -> String {
+    // First, strip thinking section if it exists
+    let response_without_thinking = if response.trim_start().starts_with("<think>") {
+        if let Some(end_index) = response.find("</think>") {
+            response[(end_index + "</think>".len())..].trim_start()
+        } else {
+            response
+        }
+    } else {
+        response
+    };
+
     // Remove any "Fixes #XXX" or "Closes #XXX" lines
-    let lines: Vec<&str> = response
+    let lines: Vec<&str> = response_without_thinking
         .lines()
         .filter(|line| !line.starts_with("Fixes #") && !line.starts_with("Closes #"))
         .collect();
