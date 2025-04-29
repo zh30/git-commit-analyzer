@@ -1,8 +1,8 @@
 use git2::{Config, IndexAddOption, Repository, Signature};
 use reqwest::blocking::Client;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::env;
-use std::io::{self, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
@@ -71,28 +71,56 @@ Remember: Your response should only include the commit message, nothing else.",
         diff
     );
 
+    println!("Generating commit message...");
+    
+    // Make request with streaming enabled
     let response = client
         .post(format!("{}/generate", OLLAMA_API_BASE))
         .json(&json!({
             "model": model,
             "prompt": prompt,
-            "stream": false
+            "stream": true
         }))
         .send()?;
 
-    if response.status().is_success() {
-        let result: serde_json::Value = response.json()?;
-        let raw_message = result["response"].as_str().unwrap_or("").trim().to_string();
-
-        // Post-process Ollama's response
-        Ok(process_ollama_response(&raw_message))
-    } else {
-        Err(format!(
+    if !response.status().is_success() {
+        return Err(format!(
             "Error: Unable to get response from Ollama. Status code: {}",
             response.status()
         )
-        .into())
+        .into());
     }
+
+    // Process the streaming response
+    let mut full_response = String::new();
+    let reader = BufReader::new(response);
+    io::stdout().flush()?;
+
+    for line in reader.lines() {
+        let line = line?;
+        if line.is_empty() {
+            continue;
+        }
+
+        // Parse the JSON response
+        if let Ok(json) = serde_json::from_str::<Value>(&line) {
+            if let Some(response_part) = json["response"].as_str() {
+                print!("{}", response_part);
+                io::stdout().flush()?;
+                full_response.push_str(response_part);
+            }
+            
+            // If done is true, we've received the complete response
+            if json["done"].as_bool().unwrap_or(false) {
+                break;
+            }
+        }
+    }
+    
+    println!("\n\nCommit message generated.");
+    
+    // Post-process Ollama's response
+    Ok(process_ollama_response(&full_response))
 }
 
 fn process_ollama_response(response: &str) -> String {
@@ -266,12 +294,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let diff = get_diff()?;
+    
     let mut commit_msg = analyze_diff(&diff, &model)?;
 
     loop {
-        println!("\nProposed commit message:");
-        println!("{}", commit_msg);
-
         let choice = get_user_input(
             "\nDo you want to (u)se this message, (e)dit it, or (c)ancel? [u/e/c]: ",
         )?;
