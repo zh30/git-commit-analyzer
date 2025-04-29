@@ -8,13 +8,6 @@ use std::process::Command;
 use std::time::Duration;
 
 const OLLAMA_API_BASE: &str = "http://localhost:11434/api";
-const GROQ_API_BASE: &str = "https://api.groq.com/openai/v1/chat/completions";
-const CEREBRAS_API_BASE: &str = "https://api.cerebras.ai/v1/chat/completions";
-enum AIProvider {
-    Ollama,
-    Groq,
-    Cerebras,
-}
 
 fn find_git_repository(start_path: &PathBuf) -> Option<PathBuf> {
     let mut current_path = start_path.clone();
@@ -34,9 +27,10 @@ fn get_diff() -> Result<String, Box<dyn std::error::Error>> {
     Ok(String::from_utf8(output.stdout)?)
 }
 
-fn analyze_diff(diff: &str, provider: AIProvider) -> Result<String, Box<dyn std::error::Error>> {
+fn analyze_diff(diff: &str, model: &str) -> Result<String, Box<dyn std::error::Error>> {
     let client = Client::new();
-    let base_prompt = format!(
+    
+    let prompt = format!(
         "Analyze this git diff and provide a **single** commit message following the Git Flow format:
 
 <type>(<scope>): <subject>
@@ -61,13 +55,6 @@ Here's the diff to analyze:
 
 {}
 
-",
-        diff
-    );
-
-    let ollama_prompt = format!(
-        "{}
-
 Your task:
 1. Analyze the given git diff.
 2. **Generate only one** commit message strictly following the Git Flow format described above.
@@ -81,110 +68,41 @@ Add a new endpoint for password reset requests.
 Implement email sending for reset links.
 
 Remember: Your response should only include the commit message, nothing else.",
-        base_prompt
+        diff
     );
 
-    let groq_prompt = format!(
-        "{}
+    let response = client
+        .post(format!("{}/generate", OLLAMA_API_BASE))
+        .json(&json!({
+            "model": model,
+            "prompt": prompt,
+            "stream": false
+        }))
+        .send()?;
 
-Please provide **only one** formatted commit message, without any additional explanations or markdown formatting. 
-Important: Do not include 'Fixes #XXX' or 'Closes #XXX' unless the issue number is explicitly mentioned in the diff.",
-        base_prompt
-    );
+    if response.status().is_success() {
+        let result: serde_json::Value = response.json()?;
+        let raw_message = result["response"].as_str().unwrap_or("").trim().to_string();
 
-    match provider {
-        AIProvider::Ollama => {
-            let response = client
-                .post(format!("{}/generate", OLLAMA_API_BASE))
-                .json(&json!({
-                    "model": "llama3.2",
-                    "prompt": ollama_prompt,
-                    "stream": false
-                }))
-                .send()?;
-
-            if response.status().is_success() {
-                let result: serde_json::Value = response.json()?;
-                let raw_message = result["response"].as_str().unwrap_or("").trim().to_string();
-
-                // 对 Ollama 的响应进行后处理
-                Ok(process_ollama_response(&raw_message))
-            } else {
-                Err(format!(
-                    "Error: Unable to get response from Ollama. Status code: {}",
-                    response.status()
-                )
-                .into())
-            }
-        }
-        AIProvider::Groq => {
-            let groq_api_key = env::var("GROQ_API_KEY").expect("GROQ_API_KEY not set");
-            let response = client
-                .post(GROQ_API_BASE)
-                .header("Authorization", format!("Bearer {}", groq_api_key))
-                .json(&json!({
-                    "model": "llama-3.2-90b-text-preview",
-                    "messages": [{"role": "user", "content": groq_prompt}]
-                }))
-                .send()?;
-
-            if response.status().is_success() {
-                let result: serde_json::Value = response.json()?;
-                Ok(result["choices"][0]["message"]["content"]
-                    .as_str()
-                    .unwrap_or("")
-                    .trim()
-                    .to_string())
-            } else {
-                Err(format!(
-                    "Error: Unable to get response from Groq. Status code: {}",
-                    response.status()
-                )
-                .into())
-            }
-        }
-        AIProvider::Cerebras => {
-            let cerebras_api_key = env::var("CEREBRAS_API_KEY").expect("CEREBRAS_API_KEY not set");
-            let response = client
-                .post(CEREBRAS_API_BASE)
-                .header("Content-Type", "application/json")
-                .header("Authorization", format!("Bearer {}", cerebras_api_key))
-                .json(&json!({
-                    "model": "llama3.1-70b",
-                    "messages": [{"role": "user", "content": groq_prompt}],
-                    "max_tokens": -1,
-                    "temperature": 0,
-                    "top_p": 1,
-                    "stream": false
-                }))
-                .send()?;
-
-            if response.status().is_success() {
-                let result: serde_json::Value = response.json()?;
-                Ok(result["choices"][0]["message"]["content"]
-                    .as_str()
-                    .unwrap_or("")
-                    .trim()
-                    .to_string())
-            } else {
-                Err(format!(
-                    "Error: Unable to get response from Cerebras. Status code: {}",
-                    response.status()
-                )
-                .into())
-            }
-        }
+        // Post-process Ollama's response
+        Ok(process_ollama_response(&raw_message))
+    } else {
+        Err(format!(
+            "Error: Unable to get response from Ollama. Status code: {}",
+            response.status()
+        )
+        .into())
     }
 }
 
 fn process_ollama_response(response: &str) -> String {
-    // 移除任何 "Fixes #XXX" 或 "Closes #XXX" 行
+    // Remove any "Fixes #XXX" or "Closes #XXX" lines
     let lines: Vec<&str> = response
         .lines()
         .filter(|line| !line.starts_with("Fixes #") && !line.starts_with("Closes #"))
         .collect();
 
-    // 确保只返回符合 Git Flow 格式的内容
+    // Ensure only content in Git Flow format is returned
     let mut processed_lines = Vec::new();
     let mut started = false;
 
@@ -244,30 +162,92 @@ fn get_or_set_user_info(
     }
 }
 
-fn is_ollama_running() -> Result<bool, Box<dyn std::error::Error>> {
+fn get_ollama_models() -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
-
     let response = client.get(format!("{}/tags", OLLAMA_API_BASE)).send()?;
 
     if response.status().is_success() {
         let data: serde_json::Value = response.json()?;
+        let mut models = Vec::new();
 
-        if let Some(models) = data["models"].as_array() {
-            for model in models {
+        if let Some(models_array) = data["models"].as_array() {
+            for model in models_array {
                 if let Some(name) = model["name"].as_str() {
-                    // 检查模型名称是否包含 "llama" 和 "3.1"
-                    if name.to_lowercase().contains("llama") && name.contains("3.2") {
-                        return Ok(true);
-                    }
+                    models.push(name.to_string());
                 }
             }
         }
+
+        Ok(models)
+    } else {
+        Err(format!(
+            "Error: Unable to get models from Ollama. Status code: {}",
+            response.status()
+        )
+        .into())
+    }
+}
+
+fn select_default_model(config: &mut Config) -> Result<String, Box<dyn std::error::Error>> {
+    println!("Fetching available Ollama models...");
+    
+    let models = get_ollama_models()?;
+    if models.is_empty() {
+        return Err("No models found in Ollama. Please ensure Ollama is running and has models installed.".into());
     }
 
-    Ok(false)
+    println!("\nAvailable models:");
+    for (i, model) in models.iter().enumerate() {
+        println!("{}. {}", i + 1, model);
+    }
+
+    let choice = loop {
+        let input = get_user_input("\nSelect a model by number: ")?;
+        match input.parse::<usize>() {
+            Ok(num) if num > 0 && num <= models.len() => break num - 1,
+            _ => println!("Invalid selection. Please try again."),
+        }
+    };
+
+    let selected_model = models[choice].clone();
+    set_user_config(config, "commit-analyzer.model", &selected_model)?;
+    
+    println!("Model '{}' set as default.", selected_model);
+    Ok(selected_model)
+}
+
+fn is_ollama_running() -> Result<bool, Box<dyn std::error::Error>> {
+    let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
+    match client.get(format!("{}/tags", OLLAMA_API_BASE)).send() {
+        Ok(response) => Ok(response.status().is_success()),
+        Err(_) => Ok(false)
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = env::args().collect();
+    let mut config = get_git_config()?;
+    
+    // Check if the user wants to change the model
+    if args.len() > 1 && args[1] == "model" {
+        select_default_model(&mut config)?;
+        return Ok(());
+    }
+
+    // Ensure Ollama is running
+    if !is_ollama_running()? {
+        return Err("Ollama is not running. Please start Ollama and try again.".into());
+    }
+    
+    // Get or select default model
+    let model = match get_user_config(&config, "commit-analyzer.model") {
+        Ok(model) => model,
+        Err(_) => {
+            println!("No default model set. Please select a model.");
+            select_default_model(&mut config)?
+        }
+    };
+
     let current_dir = std::env::current_dir()?;
     let repo_path =
         find_git_repository(&current_dir).ok_or_else(|| "Not in a git repository".to_string())?;
@@ -286,50 +266,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let diff = get_diff()?;
-
-    let provider = if env::var("GROQ_API_KEY").is_ok() || env::var("CEREBRAS_API_KEY").is_ok() {
-        match get_user_input("Choose AI provider (1: Ollama, 2: Groq, 3: Cerebras): ")?.as_str() {
-            "1" => check_ollama_and_fallback(),
-            "2" if env::var("GROQ_API_KEY").is_ok() => AIProvider::Groq,
-            "3" if env::var("CEREBRAS_API_KEY").is_ok() => AIProvider::Cerebras,
-            _ => {
-                println!("Invalid choice or API key not set. Attempting to use Ollama...");
-                check_ollama_and_fallback()
-            }
-        }
-    } else {
-        println!("No API keys set. Attempting to use Ollama...");
-        check_ollama_and_fallback()
-    };
-
-    fn check_ollama_and_fallback() -> AIProvider {
-        match is_ollama_running() {
-            Ok(true) => AIProvider::Ollama,
-            Ok(false) => {
-                println!("Warning: Ollama is running, but llama 3.1 model is not available.");
-                fallback_to_available_provider()
-            }
-            Err(e) => {
-                println!("Error checking Ollama status: {}.", e);
-                fallback_to_available_provider()
-            }
-        }
-    }
-
-    fn fallback_to_available_provider() -> AIProvider {
-        if env::var("GROQ_API_KEY").is_ok() {
-            println!("Falling back to Groq...");
-            AIProvider::Groq
-        } else if env::var("CEREBRAS_API_KEY").is_ok() {
-            println!("Falling back to Cerebras...");
-            AIProvider::Cerebras
-        } else {
-            println!("No available AI provider. Please ensure Ollama is running with llama 3.1 model, or set GROQ_API_KEY or CEREBRAS_API_KEY.");
-            panic!("No available AI provider");
-        }
-    }
-
-    let mut commit_msg = analyze_diff(&diff, provider)?;
+    let mut commit_msg = analyze_diff(&diff, &model)?;
 
     loop {
         println!("\nProposed commit message:");
@@ -353,7 +290,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let mut config = get_git_config()?;
     let name = get_or_set_user_info(&mut config, "user.name", "Enter your name: ")?;
     let email = get_or_set_user_info(&mut config, "user.email", "Enter your email: ")?;
 
