@@ -265,6 +265,13 @@ fn is_ollama_running() -> Result<bool, Box<dyn std::error::Error>> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
+    
+    // Check for version flag
+    if args.len() > 1 && (args[1] == "--version" || args[1] == "-v") {
+        println!("git-ca version {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    
     let mut config = get_git_config()?;
     
     // Check if the user wants to change the model
