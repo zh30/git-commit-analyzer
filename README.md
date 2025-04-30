@@ -26,6 +26,7 @@ Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically 
 The easiest way to install Git Commit Analyzer is via Homebrew:
 
 ```
+brew tap zh30/git-ca
 brew install git-ca
 ```
 

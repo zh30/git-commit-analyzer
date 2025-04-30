@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -v ${{ github.ref_name }} | head -n 1)
+          if [ -z "$PREVIOUS_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"* %s (%an)" ${{ github.ref_name }})
+          else
+            CHANGELOG=$(git log --pretty=format:"* %s (%an)" $PREVIOUS_TAG..${{ github.ref_name }})
+          fi
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: git-ca ${{ github.ref_name }}
+          body: |
+            ## Changelog
+            ${{ steps.changelog.outputs.CHANGELOG }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+      - name: Get SHA256
+        id: get_sha
+        run: |
+          TARBALL_URL="https://github.com/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.tar.gz"
+          SHA256=$(curl -L $TARBALL_URL | shasum -a 256 | awk '{print $1}')
+          echo "SHA256=$SHA256" >> $GITHUB_OUTPUT
+
+      - name: Update Homebrew formula
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+          SHA256=${{ steps.get_sha.outputs.SHA256 }}
+          sed -i "s|url \".*\"|url \"https://github.com/${{ github.repository }}/archive/refs/tags/v${VERSION}.tar.gz\"|" git-ca.rb
+          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" git-ca.rb
+
+      - name: Commit and push updated formula
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: "chore: update formula for v${{ steps.get_version.outputs.VERSION }}"
+          file_pattern: git-ca.rb 
+          
+      - name: Update Homebrew Tap
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          # Clone the homebrew-tap repository
+          git clone https://x-access-token:${{ secrets.TARGET_REPO_PAT }}@github.com/zh30/homebrew-tap.git
+          
+          # Copy the updated formula to the tap repository
+          cp git-ca.rb homebrew-tap/
+          
+          # Commit and push the changes to the tap repository
+          cd homebrew-tap
+          git add git-ca.rb
+          git commit -m "chore: update git-ca to v${{ steps.get_version.outputs.VERSION }}"
+          git push
