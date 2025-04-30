@@ -37,6 +37,10 @@ jobs:
         run: |
           sed -i "s/^version = \".*\"/version = \"${{ steps.get_version.outputs.VERSION }}\"/" Cargo.toml
 
+      - name: Text Cargo.toml
+        run: |
+          cat Cargo.toml
+
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
@@ -48,6 +52,12 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+          files: |
+            Cargo.toml
+            Cargo.lock
+            README.md
+            src/
+            LICENSE
 
       - name: Get SHA256
         id: get_sha
