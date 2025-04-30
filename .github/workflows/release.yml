@@ -59,12 +59,6 @@ jobs:
           sed -i "s|url \".*\"|url \"https://github.com/${{ github.repository }}/archive/refs/tags/v${VERSION}.tar.gz\"|" git-ca.rb
           sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" git-ca.rb
 
-      - name: Commit and push updated formula
-        uses: stefanzweifel/git-auto-commit-action@v4
-        with:
-          commit_message: "chore: update formula for v${{ steps.get_version.outputs.VERSION }}"
-          file_pattern: git-ca.rb 
-          
       - name: Update Homebrew Tap
         run: |
           git config --global user.name "GitHub Actions"
