@@ -1,6 +1,6 @@
 # Git Commit Analyzer
 
-[中文版](README_ZH.md)
+[中文](README_ZH.md) | [Français](README_FR.md) | [Español](README_ES.md)
 
 Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically generate meaningful commit messages based on your staged changes. It uses Ollama to analyze git diffs and propose commit messages following the Git Flow format.
 
@@ -26,7 +26,7 @@ Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically 
 The easiest way to install Git Commit Analyzer is via Homebrew:
 
 ```
-brew tap zh30/git-ca
+brew tap zh30/tap
 brew install git-ca
 ```
 
