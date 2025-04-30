@@ -2,7 +2,7 @@
 name = "git-ca"
 version = "1.0.0"
 description = "AI-powered Git plugin for generating meaningful commit messages"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Henry Zhang <hello@zhanghe.dev>"]
 license = "MIT"
 repository = "https://github.com/zh30/git-commit-analyzer"
 edition = "2021"

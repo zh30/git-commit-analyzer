@@ -33,6 +33,10 @@ jobs:
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      - name: Change version in Cargo.toml
+        run: |
+          sed -i "s/^version = \".*\"/version = \"${{ steps.get_version.outputs.VERSION }}\"/" Cargo.toml
+
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
