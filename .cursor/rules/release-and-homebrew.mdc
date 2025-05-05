@@ -3,3 +3,9 @@ description:
 globs:
 alwaysApply: false
 ---
+# Release and Homebrew Packaging Rule
+
+- Releases are triggered by pushing a tag matching `v*.*.*` and are automated via [.github/workflows/release.yml](mdc:.github/workflows/release.yml).
+- The workflow generates a changelog, creates a GitHub release, computes the SHA256 for the tarball, and updates the Homebrew formula ([git-ca.rb](mdc:git-ca.rb)).
+- Homebrew installation instructions and formula update steps are detailed in [HOMEBREW.md](mdc:HOMEBREW.md).
+- The Homebrew formula requires Rust for building and expects Ollama to be installed and running for the tool to function.

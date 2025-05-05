@@ -3,3 +3,11 @@ description:
 globs:
 alwaysApply: false
 ---
+# Installation and Usage Rule
+
+- The tool can be installed via Homebrew using [git-ca.rb](mdc:git-ca.rb) or built manually as described in [README.md](mdc:README.md).
+- After installation, use the tool in any Git repository by staging changes and running `git ca`.
+- On first use, the user is prompted to select an Ollama model for commit message generation.
+- To change the default model, run `git ca model`.
+- The tool requires Git (2.0+), Ollama running locally, and at least one language model installed in Ollama.
+- The tool is cross-platform (Linux, macOS, Windows) and supports interactive commit message editing or cancellation.

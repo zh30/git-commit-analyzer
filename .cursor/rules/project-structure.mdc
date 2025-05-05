@@ -3,3 +3,14 @@ description:
 globs:
 alwaysApply: false
 ---
+# Project Structure Guide
+
+This project is a Rust-based CLI tool for generating AI-powered Git commit messages, primarily using [src/main.rs](mdc:src/main.rs) as the main entry point. The project is documented in [README.md](mdc:README.md), which covers installation, usage, and contribution guidelines. Packaging and Homebrew installation details are managed in [git-ca.rb](mdc:git-ca.rb).
+
+- All Rust source code is located in the `src/` directory.
+- The main binary is built from [src/main.rs](mdc:src/main.rs).
+- [Cargo.toml](mdc:Cargo.toml) and [Cargo.lock](mdc:Cargo.lock) define dependencies and metadata.
+- Homebrew packaging is handled by [git-ca.rb](mdc:git-ca.rb).
+- CI/CD and release automation are defined in [.github/workflows/release.yml](mdc:.github/workflows/release.yml).
+- The project is licensed under the MIT License ([LICENSE](mdc:LICENSE)).
+- Documentation is available in multiple languages: [README.md](mdc:README.md), [README_ZH.md](mdc:README_ZH.md), [README_FR.md](mdc:README_FR.md), [README_ES.md](mdc:README_ES.md).

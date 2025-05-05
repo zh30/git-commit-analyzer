@@ -3,3 +3,9 @@ description:
 globs:
 alwaysApply: false
 ---
+# Dependencies and Configuration Rule
+
+- Project dependencies are managed in [Cargo.toml](mdc:Cargo.toml) and include `git2`, `reqwest` (with `blocking` and `json` features), and `serde_json`.
+- The tool requires Git (2.0+), Rust (for building), and Ollama running locally with at least one language model installed.
+- User configuration (such as default model, name, and email) is stored in the Git config and managed at runtime (see [src/main.rs](mdc:src/main.rs)).
+- The tool checks for Ollama availability before generating commit messages and prompts for model selection if not set.
