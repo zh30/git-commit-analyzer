@@ -11,7 +11,8 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:gitCommitAnalyzer.generateMessage"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -28,6 +29,13 @@
           "command": "gitCommitAnalyzer.generateMessage",
           "when": "scmProvider == git && scmHasChanges",
           "group": "navigation"
+        }
+      ],
+      "scm/resourceGroup/context": [
+        {
+          "command": "gitCommitAnalyzer.generateMessage",
+          "when": "scmProvider == git && scmHasChanges",
+          "group": "1_modification"
         }
       ]
     }

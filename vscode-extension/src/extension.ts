@@ -39,6 +39,19 @@ async function generateCommitMessage() {
 
         const workspaceFolder = vscode.workspace.workspaceFolders[0];
         
+        // Check if git-ca binary is available
+        const binaryPath = findGitCaBinary();
+        if (!binaryPath) {
+            const selection = await vscode.window.showErrorMessage(
+                'git-ca binary not found. Please ensure it is built and available in PATH.',
+                'Open Documentation'
+            );
+            if (selection === 'Open Documentation') {
+                vscode.env.openExternal(vscode.Uri.parse('https://github.com/your-repo/git-commit-analyzer#installation'));
+            }
+            return;
+        }
+
         // Check if we have any staged changes
         const hasStagedChanges = await checkStagedChanges(workspaceFolder.uri.fsPath);
         if (!hasStagedChanges) {
@@ -53,6 +66,7 @@ async function generateCommitMessage() {
             cancellable: false
         }, async (progress) => {
             try {
+                progress.report({ increment: 10 });
                 const message = await runGitCommitAnalyzer(workspaceFolder.uri.fsPath);
                 
                 if (message) {
@@ -63,17 +77,27 @@ async function generateCommitMessage() {
                         if (git.repositories.length > 0) {
                             const repository = git.repositories[0];
                             repository.inputBox.value = message;
-                            vscode.window.showInformationMessage('Commit message generated!');
+                            vscode.window.showInformationMessage('Commit message generated!', 'Preview').then(selection => {
+                                if (selection === 'Preview') {
+                                    vscode.window.showInformationMessage(message, { modal: true });
+                                }
+                            });
                         }
                     }
                 }
             } catch (error) {
-                vscode.window.showErrorMessage(`Failed to generate commit message: ${error}`);
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`Failed to generate commit message: ${errorMessage}`, 'View Details').then(selection => {
+                    if (selection === 'View Details') {
+                        vscode.window.showErrorMessage(errorMessage, { modal: true });
+                    }
+                });
             }
         });
 
     } catch (error) {
-        vscode.window.showErrorMessage(`Error: ${error}`);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(`Error: ${errorMessage}`);
     }
 }
 
@@ -91,15 +115,14 @@ async function checkStagedChanges(workspacePath: string): Promise<boolean> {
 
 async function runGitCommitAnalyzer(workspacePath: string): Promise<string> {
     return new Promise((resolve, reject) => {
-        // Find the git-ca binary
         const binaryPath = findGitCaBinary();
         if (!binaryPath) {
-            reject('git-ca binary not found. Please ensure it is built and available.');
+            reject(new Error('git-ca binary not found'));
             return;
         }
 
-        // Execute the binary and capture output
-        const child = child_process.spawn(binaryPath, [], {
+        // Execute the binary with --quiet flag to skip interactive prompt
+        const child = child_process.spawn(binaryPath, ['--quiet'], {
             cwd: workspacePath,
             stdio: ['pipe', 'pipe', 'pipe']
         });
@@ -117,66 +140,61 @@ async function runGitCommitAnalyzer(workspacePath: string): Promise<string> {
 
         child.on('close', (code) => {
             if (code === 0) {
-                // Extract the commit message from the output
-                const message = extractCommitMessage(output);
-                resolve(message);
+                const message = output.trim();
+                if (message) {
+                    resolve(message);
+                } else {
+                    reject(new Error('No commit message generated'));
+                }
             } else {
-                reject(errorOutput || `Process exited with code ${code}`);
+                reject(new Error(errorOutput || `git-ca exited with code ${code}`));
             }
         });
 
         child.on('error', (error) => {
-            reject(`Failed to start process: ${error.message}`);
+            reject(new Error(`Failed to start git-ca: ${error.message}`));
         });
-
-        // Send 'u' to use the generated message
-        child.stdin.write('u\n');
-        child.stdin.end();
     });
 }
 
-function extractCommitMessage(output: string): string {
-    // Look for the commit message in the output
-    const lines = output.split('\n');
-    let messageStart = false;
-    const messageLines: string[] = [];
-
-    for (const line of lines) {
-        if (line.includes('Changes committed successfully.')) {
-            break;
-        }
-        
-        if (messageStart) {
-            if (line.trim()) {
-                messageLines.push(line);
-            }
-        }
-        
-        if (line.includes('Commit message:')) {
-            messageStart = true;
-        }
-    }
-
-    return messageLines.join('\n').trim();
-}
 
 function findGitCaBinary(): string | null {
+    if (!vscode.workspace.workspaceFolders) {
+        return null;
+    }
+
+    const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    
     // Try common locations
     const possiblePaths = [
-        // Look in workspace parent directory
-        path.join(vscode.workspace.workspaceFolders![0].uri.fsPath, '..', 'target', 'release', 'git-ca'),
+        // Look in workspace parent directory (for development)
+        path.join(workspaceRoot, '..', 'target', 'release', 'git-ca'),
+        path.join(workspaceRoot, '..', 'target', 'debug', 'git-ca'),
         // Look in system PATH
         'git-ca',
         // Look in common bin directories
         path.join(process.env.HOME || '', '.cargo', 'bin', 'git-ca'),
         path.join('/usr', 'local', 'bin', 'git-ca'),
-        path.join('/usr', 'bin', 'git-ca')
+        path.join('/usr', 'bin', 'git-ca'),
+        // Look in git-plugins directory
+        path.join(process.env.HOME || '', '.git-plugins', 'git-ca')
     ];
 
     for (const binaryPath of possiblePaths) {
         try {
-            child_process.execSync(`which ${binaryPath}`);
-            return binaryPath;
+            // Check if the file exists and is executable
+            if (binaryPath === 'git-ca') {
+                // Check PATH
+                child_process.execSync('which git-ca', { stdio: 'ignore' });
+                return 'git-ca';
+            } else {
+                // Check specific file
+                const stats = require('fs').statSync(binaryPath);
+                if (stats.isFile()) {
+                    child_process.execSync(`test -x "${binaryPath}"`, { stdio: 'ignore' });
+                    return binaryPath;
+                }
+            }
         } catch {
             // Continue searching
         }

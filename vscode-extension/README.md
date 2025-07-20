@@ -66,20 +66,21 @@ To change the default model, you can run the binary directly:
 ## Troubleshooting
 
 ### Binary Not Found
-If the extension can't find the git-ca binary:
-1. Ensure you've built it with `cargo build --release`
-2. Check the binary is in `target/release/git-ca`
-3. Add the binary directory to your PATH
-
-### Ollama Issues
-- Ensure Ollama is running: `ollama serve`
-- Check available models: `ollama list`
-- Install a model: `ollama pull llama2` or `ollama pull mistral`
+If you see "git-ca binary not found", ensure:
+1. The CLI tool is built: `cargo build --release`
+2. The binary is in `target/release/git-ca`
+3. Add the binary directory to your PATH: `export PATH="$PATH:$(pwd)/target/release"`
+4. For development, the binary can also be in `../target/release/git-ca`
 
 ### Git Issues
 - Ensure you're in a Git repository
-- Check that you have staged changes
+- Check that you have staged changes: `git diff --cached --name-only`
 - Verify your Git configuration is set up correctly
+
+### Extension Not Showing
+- Ensure you have staged changes (run `git add .`)
+- Check that Git is properly initialized
+- Look for the wand icon (🪄) in the Source Control panel title bar
 
 ## Extension Development
 
