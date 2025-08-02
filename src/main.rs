@@ -1,5 +1,6 @@
 use git2::{Config, IndexAddOption, Repository, Signature};
 use reqwest::blocking::Client;
+use reqwest::header::{HeaderMap, HeaderValue, HOST};
 use serde_json::{json, Value};
 use std::env;
 use std::fmt;
@@ -346,8 +347,12 @@ fn create_http_client() -> Result<Client> {
 }
 
 fn create_generation_client() -> Result<Client> {
+    let mut headers = HeaderMap::new();
+    headers.insert(HOST, HeaderValue::from_static("localhost:11434"));
+    
     Ok(Client::builder()
         .timeout(Duration::from_secs(120))  // 2 minutes for AI generation
+        .default_headers(headers)
         .build()?)
 }
 
