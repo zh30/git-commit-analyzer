@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
-Git Commit Analyzer is a Rust-based Git plugin that uses Ollama AI to generate meaningful commit messages from staged changes. It follows Git Flow format conventions and provides both a CLI tool and a VS Code extension for enhanced developer experience.
+Git Commit Analyzer is a Rust-based Git plugin that uses Ollama AI to generate meaningful commit messages from staged changes. It follows Git Flow format conventions, supports multiple languages, and provides both a CLI tool and a VS Code extension for enhanced developer experience.
 
 ## Core Architecture
 - **Primary Language**: Rust (edition 2021) for CLI tool
@@ -20,7 +20,8 @@ Git Commit Analyzer is a Rust-based Git plugin that uses Ollama AI to generate m
 ```bash
 cargo build --release          # Build release binary
 cargo run                      # Run in debug mode
-cargo run -- model            # Change default Ollama model
+cargo run -- model             # Change default Ollama model
+cargo run -- language          # Change default output language
 cargo check                    # Quick check for compilation errors
 cargo clippy                   # Lint code
 cargo fmt                      # Format code
@@ -51,12 +52,15 @@ cd vscode-extension && npm run package
 ## Key Components
 
 ### Core Functions (`src/main.rs`)
-- `main()`: CLI entry point at line 266
-- `analyze_diff()`: AI message generation at line 30
-- `get_diff()`: Gets staged changes via `git diff --cached` at line 25
-- `find_git_repository()`: Locates repo from current directory at line 12
-- `process_ollama_response()`: Post-processes AI output at line 126
-- `select_default_model()`: Interactive model selection at line 230
+- `main()`: CLI entry point at line 318
+- `analyze_diff()`: AI message generation at line 209 (now supports language parameter)
+- `build_commit_prompt()`: Language-specific prompt generation at line 126
+- `get_diff()`: Gets staged changes via `git diff --cached` at line 88
+- `find_git_repository()`: Locates repo from current directory at line 76
+- `process_ollama_response()`: Post-processes AI output at line 187
+- `select_default_model()`: Interactive model selection at line 339
+- `select_language()`: Interactive language selection at line 312
+- `get_language()`: Gets configured language with English default at line 331
 
 ### VS Code Extension (`vscode-extension/src/extension.ts`)
 - Command registration: `gitCommitAnalyzer.generateMessage`
@@ -67,7 +71,9 @@ cd vscode-extension && npm run package
 ### Configuration Management
 - Git config integration via `git2::Config`
 - Model selection stored in `commit-analyzer.model` key
+- Language selection stored in `commit-analyzer.language` key (English default)
 - User info auto-configured from Git settings
+- Support for English and Simplified Chinese output languages
 
 ### Ollama Integration
 - API base URL: `http://localhost:11434/api`
@@ -84,6 +90,7 @@ cd vscode-extension && npm run package
 ## Usage Patterns
 - Primary command: `git ca` (after installation)
 - Model management: `git ca model`
+- Language selection: `git ca language` (English/Chinese)
 - Version check: `git ca --version`
 - VS Code: Use wand icon in SCM panel or context menu
 
@@ -98,4 +105,6 @@ cd vscode-extension && npm run package
 - Git repository detection
 - Staged changes validation
 - Model selection fallback
+- Language selection with English default
+- Custom error types with unified handling (AppError enum)
 - Binary path discovery for VS Code extension

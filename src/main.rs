@@ -2,18 +2,112 @@ use git2::{Config, IndexAddOption, Repository, Signature};
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
 use std::env;
+use std::fmt;
 use std::io::{self, BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
 const OLLAMA_API_BASE: &str = "http://localhost:11434/api";
+const CONFIG_MODEL_KEY: &str = "commit-analyzer.model";
+const CONFIG_LANGUAGE_KEY: &str = "commit-analyzer.language";
+const COMMIT_TYPES: &[&str] = &["feat", "fix", "docs", "style", "refactor", "test", "chore"];
 
-fn find_git_repository(start_path: &PathBuf) -> Option<PathBuf> {
-    let mut current_path = start_path.clone();
+#[derive(Debug, Clone, PartialEq)]
+enum Language {
+    English,
+    Chinese,
+}
+
+impl Language {
+    fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "en" | "english" => Some(Language::English),
+            "zh" | "chinese" | "中文" => Some(Language::Chinese),
+            _ => None,
+        }
+    }
+
+    fn to_string(&self) -> &'static str {
+        match self {
+            Language::English => "en",
+            Language::Chinese => "zh",
+        }
+    }
+
+    fn display_name(&self) -> &'static str {
+        match self {
+            Language::English => "English",
+            Language::Chinese => "简体中文",
+        }
+    }
+}
+
+#[derive(Debug)]
+enum AppError {
+    Git(git2::Error),
+    Io(io::Error),
+    Http(reqwest::Error),
+    Json(serde_json::Error),
+    Custom(String),
+}
+
+impl fmt::Display for AppError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AppError::Git(e) => write!(f, "Git error: {e}"),
+            AppError::Io(e) => write!(f, "IO error: {e}"),
+            AppError::Http(e) => write!(f, "HTTP error: {e}"),
+            AppError::Json(e) => write!(f, "JSON error: {e}"),
+            AppError::Custom(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl std::error::Error for AppError {}
+
+impl From<git2::Error> for AppError {
+    fn from(err: git2::Error) -> Self {
+        AppError::Git(err)
+    }
+}
+
+impl From<io::Error> for AppError {
+    fn from(err: io::Error) -> Self {
+        AppError::Io(err)
+    }
+}
+
+impl From<reqwest::Error> for AppError {
+    fn from(err: reqwest::Error) -> Self {
+        AppError::Http(err)
+    }
+}
+
+impl From<serde_json::Error> for AppError {
+    fn from(err: serde_json::Error) -> Self {
+        AppError::Json(err)
+    }
+}
+
+impl From<String> for AppError {
+    fn from(msg: String) -> Self {
+        AppError::Custom(msg)
+    }
+}
+
+impl From<&str> for AppError {
+    fn from(msg: &str) -> Self {
+        AppError::Custom(msg.to_string())
+    }
+}
+
+type Result<T> = std::result::Result<T, AppError>;
+
+fn find_git_repository(start_path: &Path) -> Option<PathBuf> {
+    let mut current_path = start_path.to_path_buf();
     loop {
-        let git_dir = current_path.join(".git");
-        if git_dir.is_dir() {
+        if current_path.join(".git").is_dir() {
             return Some(current_path);
         }
         if !current_path.pop() {
@@ -22,16 +116,17 @@ fn find_git_repository(start_path: &PathBuf) -> Option<PathBuf> {
     }
 }
 
-fn get_diff() -> Result<String, Box<dyn std::error::Error>> {
-    let output = Command::new("git").args(&["diff", "--cached"]).output()?;
-    Ok(String::from_utf8(output.stdout)?)
+fn get_diff() -> Result<String> {
+    let output = Command::new("git").args(["diff", "--cached"]).output()?;
+    let diff = String::from_utf8(output.stdout)
+        .map_err(|e| AppError::Custom(format!("Invalid UTF-8 in diff: {e}")))?;
+    Ok(diff)
 }
 
-fn analyze_diff(diff: &str, model: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let client = Client::new();
-    
-    let prompt = format!(
-        "Analyze this git diff and provide a **single** commit message following the Git Flow format:
+fn build_commit_prompt(diff: &str, language: &Language) -> String {
+    match language {
+        Language::English => format!(
+            "Analyze this git diff and provide a **single** commit message following the Git Flow format:
 
 <type>(<scope>): <subject>
 
@@ -53,7 +148,7 @@ Important guidelines:
 
 Here's the diff to analyze:
 
-{}
+{diff}
 
 Your task:
 1. Analyze the given git diff.
@@ -67,50 +162,107 @@ feat(user-auth): implement password reset functionality
 Add a new endpoint for password reset requests.
 Implement email sending for reset links.
 
-Remember: Your response should only include the commit message, nothing else.",
-        diff
-    );
+Remember: Your response should only include the commit message, nothing else."
+        ),
+        Language::Chinese => format!(
+            "分析这个 git diff 并提供一个遵循 Git Flow 格式的提交信息：
+
+<类型>(<范围>): <主题>
+
+<正文>
+
+其中：
+- <类型> 是以下之一：feat, fix, docs, style, refactor, test, chore
+- <范围> 是可选的，表示受影响的模块
+- <主题> 是命令式语气的简短描述
+- <正文> 提供详细描述（可选）
+
+重要指导原则：
+1. 只选择一个最能代表变更主要目的的类型。
+2. 将所有变更总结为一个简洁的主题行。
+3. 不要在提交信息中包含正文或脚注。
+4. 不要提及或引用任何问题编号。
+5. 如果有多个不相关的变更，只关注最重要的变更。
+6. **确保只生成一个提交信息。**
+
+以下是要分析的 diff：
+
+{diff}
+
+你的任务：
+1. 分析给定的 git diff。
+2. **生成一个**严格遵循上述 Git Flow 格式的提交信息。
+3. 确保你的回复**只**包含格式化的提交信息，不要有任何额外的解释或 markdown。
+4. 提交信息**必须**以 <类型> 开头并遵循所示的确切结构。
+
+有效回复的示例：
+feat(用户认证): 实现密码重置功能
+
+添加密码重置请求的新端点。
+实现重置链接的邮件发送。
+
+记住：你的回复应该只包含提交信息，不要有其他内容。"
+        )
+    }
+}
+
+fn analyze_diff(diff: &str, model: &str, language: &Language) -> Result<String> {
+    let client = create_generation_client()?;
+    let prompt = build_commit_prompt(diff, language);
 
     println!("Generating commit message...");
+    println!("This may take a moment depending on your model and system...");
     
-    // Make request with streaming enabled
     let response = client
-        .post(format!("{}/generate", OLLAMA_API_BASE))
+        .post(format!("{OLLAMA_API_BASE}/generate"))
         .json(&json!({
             "model": model,
             "prompt": prompt,
             "stream": true
         }))
-        .send()?;
+        .send()
+        .map_err(|e| {
+            if e.is_timeout() {
+                AppError::Custom(format!(
+                    "Request timed out after 2 minutes. This might happen with large models or slow systems.\n\
+                    Try using a smaller/faster model with 'git ca model' or ensure your system has sufficient resources."
+                ))
+            } else if e.is_connect() {
+                AppError::Custom(format!(
+                    "Failed to connect to Ollama at {}. Please ensure Ollama is running and accessible.",
+                    OLLAMA_API_BASE
+                ))
+            } else {
+                AppError::Custom(format!("Network error: {}", e))
+            }
+        })?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "Error: Unable to get response from Ollama. Status code: {}",
+        return Err(AppError::Custom(format!(
+            "Unable to get response from Ollama. Status code: {}. Please ensure Ollama is running and accessible.",
             response.status()
-        )
-        .into());
+        )));
     }
 
-    // Process the streaming response
     let mut full_response = String::new();
     let reader = BufReader::new(response);
     io::stdout().flush()?;
 
+    println!("Processing response...");
+
     for line in reader.lines() {
-        let line = line?;
+        let line = line.map_err(|e| AppError::Custom(format!("Failed to read response: {}", e)))?;
         if line.is_empty() {
             continue;
         }
 
-        // Parse the JSON response
         if let Ok(json) = serde_json::from_str::<Value>(&line) {
             if let Some(response_part) = json["response"].as_str() {
-                print!("{}", response_part);
+                print!("{response_part}");
                 io::stdout().flush()?;
                 full_response.push_str(response_part);
             }
             
-            // If done is true, we've received the complete response
             if json["done"].as_bool().unwrap_or(false) {
                 break;
             }
@@ -118,43 +270,28 @@ Remember: Your response should only include the commit message, nothing else.",
     }
     
     println!("\n\nCommit message generated.");
-    
-    // Post-process Ollama's response
     Ok(process_ollama_response(&full_response))
 }
 
 fn process_ollama_response(response: &str) -> String {
-    // First, strip thinking section if it exists
     let response_without_thinking = if response.trim_start().starts_with("<think>") {
-        if let Some(end_index) = response.find("</think>") {
-            response[(end_index + "</think>".len())..].trim_start()
-        } else {
-            response
-        }
+        response.find("</think>")
+            .map(|end_index| response[(end_index + "</think>".len())..].trim_start())
+            .unwrap_or(response)
     } else {
         response
     };
 
-    // Remove any "Fixes #XXX" or "Closes #XXX" lines
     let lines: Vec<&str> = response_without_thinking
         .lines()
         .filter(|line| !line.starts_with("Fixes #") && !line.starts_with("Closes #"))
         .collect();
 
-    // Ensure only content in Git Flow format is returned
     let mut processed_lines = Vec::new();
     let mut started = false;
 
     for line in lines {
-        if !started
-            && (line.starts_with("feat")
-                || line.starts_with("fix")
-                || line.starts_with("docs")
-                || line.starts_with("style")
-                || line.starts_with("refactor")
-                || line.starts_with("test")
-                || line.starts_with("chore"))
-        {
+        if !started && COMMIT_TYPES.iter().any(|&t| line.starts_with(t)) {
             started = true;
         }
         if started {
@@ -165,69 +302,106 @@ fn process_ollama_response(response: &str) -> String {
     processed_lines.join("\n")
 }
 
-fn get_user_input(prompt: &str) -> io::Result<String> {
-    print!("{}", prompt);
+fn get_user_input(prompt: &str) -> Result<String> {
+    print!("{prompt}");
     io::stdout().flush()?;
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
     Ok(input.trim().to_string())
 }
 
-fn get_git_config() -> Result<Config, git2::Error> {
-    let config = Config::open_default()?;
-    Ok(config)
+struct GitConfig {
+    config: Config,
 }
 
-fn get_user_config(config: &Config, key: &str) -> Result<String, git2::Error> {
-    config.get_string(key)
-}
-
-fn set_user_config(config: &mut Config, key: &str, value: &str) -> Result<(), git2::Error> {
-    config.set_str(key, value)
-}
-
-fn get_or_set_user_info(
-    config: &mut Config,
-    key: &str,
-    prompt: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
-    match get_user_config(config, key) {
-        Ok(value) => Ok(value),
-        Err(_) => {
-            let value = get_user_input(prompt)?;
-            set_user_config(config, key, &value)?;
-            Ok(value)
-        }
+impl GitConfig {
+    fn new() -> Result<Self> {
+        Ok(Self {
+            config: Config::open_default()?,
+        })
     }
-}
 
-fn get_ollama_models() -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
-    let response = client.get(format!("{}/tags", OLLAMA_API_BASE)).send()?;
+    fn get(&self, key: &str) -> Result<String> {
+        Ok(self.config.get_string(key)?)
+    }
 
-    if response.status().is_success() {
-        let data: serde_json::Value = response.json()?;
-        let mut models = Vec::new();
+    fn set(&mut self, key: &str, value: &str) -> Result<()> {
+        Ok(self.config.set_str(key, value)?)
+    }
 
-        if let Some(models_array) = data["models"].as_array() {
-            for model in models_array {
-                if let Some(name) = model["name"].as_str() {
-                    models.push(name.to_string());
-                }
+    fn get_or_prompt(&mut self, key: &str, prompt: &str) -> Result<String> {
+        match self.get(key) {
+            Ok(value) => Ok(value),
+            Err(_) => {
+                let value = get_user_input(prompt)?;
+                self.set(key, &value)?;
+                Ok(value)
             }
         }
-
-        Ok(models)
-    } else {
-        Err(format!(
-            "Error: Unable to get models from Ollama. Status code: {}",
-            response.status()
-        )
-        .into())
     }
 }
 
-fn select_default_model(config: &mut Config) -> Result<String, Box<dyn std::error::Error>> {
+fn create_http_client() -> Result<Client> {
+    Ok(Client::builder().timeout(Duration::from_secs(5)).build()?)
+}
+
+fn create_generation_client() -> Result<Client> {
+    Ok(Client::builder()
+        .timeout(Duration::from_secs(120))  // 2 minutes for AI generation
+        .build()?)
+}
+
+fn get_ollama_models() -> Result<Vec<String>> {
+    let client = create_http_client()?;
+    let response = client.get(format!("{OLLAMA_API_BASE}/tags")).send()?;
+
+    if !response.status().is_success() {
+        return Err(AppError::Custom(format!(
+            "Unable to get models from Ollama. Status code: {}",
+            response.status()
+        )));
+    }
+
+    let data: Value = response.json()?;
+    let models = data["models"]
+        .as_array()
+        .ok_or("Invalid response format")?
+        .iter()
+        .filter_map(|model| model["name"].as_str())
+        .map(String::from)
+        .collect();
+
+    Ok(models)
+}
+
+fn select_language(git_config: &mut GitConfig) -> Result<Language> {
+    println!("Available languages:");
+    println!("1. English");
+    println!("2. 简体中文");
+
+    let choice = loop {
+        let input = get_user_input("\nSelect a language by number: ")?;
+        match input.parse::<usize>() {
+            Ok(1) => break Language::English,
+            Ok(2) => break Language::Chinese,
+            _ => println!("Invalid selection. Please try again."),
+        }
+    };
+
+    git_config.set(CONFIG_LANGUAGE_KEY, choice.to_string())?;
+    println!("Language set to: {}", choice.display_name());
+    Ok(choice)
+}
+
+fn get_language(git_config: &GitConfig) -> Language {
+    git_config
+        .get(CONFIG_LANGUAGE_KEY)
+        .ok()
+        .and_then(|lang| Language::from_str(&lang))
+        .unwrap_or(Language::English)
+}
+
+fn select_default_model(git_config: &mut GitConfig) -> Result<String> {
     println!("Fetching available Ollama models...");
     
     let models = get_ollama_models()?;
@@ -249,71 +423,74 @@ fn select_default_model(config: &mut Config) -> Result<String, Box<dyn std::erro
     };
 
     let selected_model = models[choice].clone();
-    set_user_config(config, "commit-analyzer.model", &selected_model)?;
+    git_config.set(CONFIG_MODEL_KEY, &selected_model)?;
     
-    println!("Model '{}' set as default.", selected_model);
+    println!("Model '{selected_model}' set as default.");
     Ok(selected_model)
 }
 
-fn is_ollama_running() -> Result<bool, Box<dyn std::error::Error>> {
-    let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
-    match client.get(format!("{}/tags", OLLAMA_API_BASE)).send() {
+fn is_ollama_running() -> Result<bool> {
+    let client = create_http_client()?;
+    match client.get(format!("{OLLAMA_API_BASE}/tags")).send() {
         Ok(response) => Ok(response.status().is_success()),
-        Err(_) => Ok(false)
+        Err(e) => {
+            eprintln!("Warning: Failed to connect to Ollama: {}", e);
+            eprintln!("Please ensure Ollama is running on localhost:11434");
+            Ok(false)
+        }
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     
-    // Check for version flag
     if args.len() > 1 && (args[1] == "--version" || args[1] == "-v") {
         println!("git-ca version {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
     
-    let mut config = get_git_config()?;
+    let mut git_config = GitConfig::new()?;
     
-    // Check if the user wants to change the model
     if args.len() > 1 && args[1] == "model" {
-        select_default_model(&mut config)?;
+        select_default_model(&mut git_config)?;
         return Ok(());
     }
 
-    // Ensure Ollama is running
+    if args.len() > 1 && args[1] == "language" {
+        select_language(&mut git_config)?;
+        return Ok(());
+    }
+
     if !is_ollama_running()? {
-        return Err("Ollama is not running. Please start Ollama and try again.".into());
+        return Err("Ollama is not running or not accessible. Please start Ollama and ensure it's running on localhost:11434, then try again.".into());
     }
     
-    // Get or select default model
-    let model = match get_user_config(&config, "commit-analyzer.model") {
+    let model = match git_config.get(CONFIG_MODEL_KEY) {
         Ok(model) => model,
         Err(_) => {
             println!("No default model set. Please select a model.");
-            select_default_model(&mut config)?
+            select_default_model(&mut git_config)?
         }
     };
 
-    let current_dir = std::env::current_dir()?;
-    let repo_path =
-        find_git_repository(&current_dir).ok_or_else(|| "Not in a git repository".to_string())?;
+    let language = get_language(&git_config);
+
+    let current_dir = env::current_dir()?;
+    let repo_path = find_git_repository(&current_dir)
+        .ok_or("Not in a git repository")?;
 
     let repo = Repository::open(repo_path)?;
     let mut index = repo.index()?;
 
-    std::env::set_current_dir(&repo.path().parent().unwrap())?;
+    env::set_current_dir(repo.path().parent().unwrap())?;
 
-    if index
-        .add_all(&["*"], IndexAddOption::DEFAULT, None)
-        .is_err()
-    {
+    if index.add_all(["*"], IndexAddOption::DEFAULT, None).is_err() {
         println!("No changes staged for commit.");
         return Ok(());
     }
 
     let diff = get_diff()?;
-    
-    let mut commit_msg = analyze_diff(&diff, &model)?;
+    let mut commit_msg = analyze_diff(&diff, &model, &language)?;
 
     loop {
         let choice = get_user_input(
@@ -334,8 +511,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let name = get_or_set_user_info(&mut config, "user.name", "Enter your name: ")?;
-    let email = get_or_set_user_info(&mut config, "user.email", "Enter your email: ")?;
+    let name = git_config.get_or_prompt("user.name", "Enter your name: ")?;
+    let email = git_config.get_or_prompt("user.email", "Enter your email: ")?;
 
     let signature = Signature::now(&name, &email)?;
     let tree_id = index.write_tree()?;
@@ -352,7 +529,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     println!("\nChanges committed successfully.");
-    println!("Commit message:\n{}", commit_msg);
+    println!("Commit message:\n{commit_msg}");
 
     Ok(())
 }

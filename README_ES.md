@@ -9,6 +9,7 @@ Analizador de Commits Git es un potente plugin de Git que utiliza IA para genera
 - Generación automática de mensajes de commit que cumplen con Git Flow
 - Funciona con Ollama para procesamiento de IA local
 - Modo interactivo que permite a los usuarios usar, editar o cancelar el mensaje de commit propuesto
+- Soporte multiidioma (Inglés y Chino Simplificado)
 - Compatibilidad multiplataforma (Linux, macOS, Windows)
 - Personalizable con tu firma Git personal
 - Soporte para selección y persistencia de modelos
@@ -113,11 +114,25 @@ Después de la instalación, puede utilizar Git Commit Analyzer en cualquier rep
 4. El programa analizará sus cambios preparados y generará un mensaje de commit sugerido.
 5. Puede elegir usar el mensaje sugerido, editarlo o cancelar el commit.
 
+### Comandos de Configuración
+
 Para cambiar el modelo predeterminado en cualquier momento, ejecute:
 
 ```
 git ca model
 ```
+
+Para establecer el idioma de salida para los mensajes de commit generados por IA, ejecute:
+
+```
+git ca language
+```
+
+Idiomas disponibles:
+- Inglés (predeterminado)
+- Chino Simplificado (简体中文)
+
+El idioma seleccionado determinará el idioma del mensaje de commit generado por el modelo de IA. Nota: esto afecta el idioma del prompt de la IA, no el idioma de la interfaz.
 
 ## Contribución
 
