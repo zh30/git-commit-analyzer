@@ -42,6 +42,195 @@ impl Language {
             Language::Chinese => "简体中文",
         }
     }
+
+    fn generating_commit_message(&self) -> &'static str {
+        match self {
+            Language::English => "Generating commit message...",
+            Language::Chinese => "正在生成提交信息...",
+        }
+    }
+
+    fn this_may_take_moment(&self) -> &'static str {
+        match self {
+            Language::English => "This may take a moment depending on your model and system...",
+            Language::Chinese => "这可能需要一些时间，取决于您的模型和系统配置...",
+        }
+    }
+
+    fn processing_response(&self) -> &'static str {
+        match self {
+            Language::English => "Processing response...",
+            Language::Chinese => "正在处理响应...",
+        }
+    }
+
+    fn commit_message_generated(&self) -> &'static str {
+        match self {
+            Language::English => "\n\nCommit message generated.",
+            Language::Chinese => "\n\n提交信息已生成。",
+        }
+    }
+
+    fn available_languages(&self) -> &'static str {
+        match self {
+            Language::English => "Available languages:",
+            Language::Chinese => "可选语言：",
+        }
+    }
+
+    fn select_language_prompt(&self) -> &'static str {
+        match self {
+            Language::English => "\nSelect a language by number: ",
+            Language::Chinese => "\n请输入语言编号：",
+        }
+    }
+
+    fn invalid_selection(&self) -> &'static str {
+        match self {
+            Language::English => "Invalid selection. Please try again.",
+            Language::Chinese => "无效选择，请重试。",
+        }
+    }
+
+    fn language_set_to(&self) -> &'static str {
+        match self {
+            Language::English => "Language set to: {}",
+            Language::Chinese => "语言已设置为：{}",
+        }
+    }
+
+    fn fetching_models(&self) -> &'static str {
+        match self {
+            Language::English => "Fetching available Ollama models...",
+            Language::Chinese => "正在获取可用的 Ollama 模型...",
+        }
+    }
+
+    fn available_models(&self) -> &'static str {
+        match self {
+            Language::English => "\nAvailable models:",
+            Language::Chinese => "\n可用模型：",
+        }
+    }
+
+    fn select_model_prompt(&self) -> &'static str {
+        match self {
+            Language::English => "\nSelect a model by number: ",
+            Language::Chinese => "\n请输入模型编号：",
+        }
+    }
+
+    fn model_set_as_default(&self) -> &'static str {
+        match self {
+            Language::English => "Model '{}' set as default.",
+            Language::Chinese => "已将模型'{}'设置为默认模型。",
+        }
+    }
+
+    fn ollama_connection_warning(&self) -> &'static str {
+        match self {
+            Language::English => "Warning: Failed to connect to Ollama: {}",
+            Language::Chinese => "警告：连接 Ollama 失败：{}",
+        }
+    }
+
+    fn ensure_ollama_running(&self) -> &'static str {
+        match self {
+            Language::English => "Please ensure Ollama is running on localhost:11434",
+            Language::Chinese => "请确保 Ollama 正在 localhost:11434 上运行",
+        }
+    }
+
+    fn no_default_model(&self) -> &'static str {
+        match self {
+            Language::English => "No default model set. Please select a model.",
+            Language::Chinese => "未设置默认模型，请选择一个模型。",
+        }
+    }
+
+    fn no_changes_staged(&self) -> &'static str {
+        match self {
+            Language::English => "No changes staged for commit.",
+            Language::Chinese => "没有暂存的更改可提交。",
+        }
+    }
+
+    fn use_edit_cancel_prompt(&self) -> &'static str {
+        match self {
+            Language::English => "\nDo you want to (u)se this message, (e)dit it, or (c)ancel? [u/e/c]: ",
+            Language::Chinese => "\n您想要 (u) 使用此信息，(e) 编辑它，还是 (c) 取消？[u/e/c]：",
+        }
+    }
+
+    fn enter_commit_message(&self) -> &'static str {
+        match self {
+            Language::English => "Enter your commit message (use multiple lines if needed, end with an empty line):\n",
+            Language::Chinese => "请输入您的提交信息（如需要可使用多行，以空行结束）：\n",
+        }
+    }
+
+    fn commit_cancelled(&self) -> &'static str {
+        match self {
+            Language::English => "Commit cancelled.",
+            Language::Chinese => "提交已取消。",
+        }
+    }
+
+    fn invalid_choice(&self) -> &'static str {
+        match self {
+            Language::English => "Invalid choice. Please try again.",
+            Language::Chinese => "无效选择，请重试。",
+        }
+    }
+
+    fn enter_name_prompt(&self) -> &'static str {
+        match self {
+            Language::English => "Enter your name: ",
+            Language::Chinese => "请输入您的姓名：",
+        }
+    }
+
+    fn enter_email_prompt(&self) -> &'static str {
+        match self {
+            Language::English => "Enter your email: ",
+            Language::Chinese => "请输入您的邮箱：",
+        }
+    }
+
+    fn changes_committed(&self) -> &'static str {
+        match self {
+            Language::English => "\nChanges committed successfully.",
+            Language::Chinese => "\n更改已成功提交。",
+        }
+    }
+
+    fn commit_message_label(&self) -> &'static str {
+        match self {
+            Language::English => "Commit message:\n{}",
+            Language::Chinese => "提交信息：\n{}",
+        }
+    }
+
+    fn ollama_not_accessible(&self) -> &'static str {
+        match self {
+            Language::English => "Ollama is not running or not accessible. Please start Ollama and ensure it's running on localhost:11434, then try again.",
+            Language::Chinese => "Ollama 未运行或不可访问。请启动 Ollama 并确保它在 localhost:11434 上运行，然后重试。",
+        }
+    }
+
+    fn no_models_found(&self) -> &'static str {
+        match self {
+            Language::English => "No models found in Ollama. Please ensure Ollama is running and has models installed.",
+            Language::Chinese => "在 Ollama 中未找到模型。请确保 Ollama 正在运行并已安装模型。",
+        }
+    }
+
+    fn not_in_git_repository(&self) -> &'static str {
+        match self {
+            Language::English => "Not in a git repository",
+            Language::Chinese => "不在 git 仓库中",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -211,8 +400,8 @@ fn analyze_diff(diff: &str, model: &str, language: &Language) -> Result<String> 
     let client = create_generation_client()?;
     let prompt = build_commit_prompt(diff, language);
 
-    println!("Generating commit message...");
-    println!("This may take a moment depending on your model and system...");
+    println!("{}", language.generating_commit_message());
+    println!("{}", language.this_may_take_moment());
     
     let response = client
         .post(format!("{OLLAMA_API_BASE}/generate"))
@@ -249,7 +438,7 @@ fn analyze_diff(diff: &str, model: &str, language: &Language) -> Result<String> 
     let reader = BufReader::new(response);
     io::stdout().flush()?;
 
-    println!("Processing response...");
+    println!("{}", language.processing_response());
 
     for line in reader.lines() {
         let line = line.map_err(|e| AppError::Custom(format!("Failed to read response: {}", e)))?;
@@ -270,7 +459,7 @@ fn analyze_diff(diff: &str, model: &str, language: &Language) -> Result<String> 
         }
     }
     
-    println!("\n\nCommit message generated.");
+    println!("{}", language.commit_message_generated());
     Ok(process_ollama_response(&full_response))
 }
 
@@ -380,21 +569,22 @@ fn get_ollama_models() -> Result<Vec<String>> {
 }
 
 fn select_language(git_config: &mut GitConfig) -> Result<Language> {
-    println!("Available languages:");
+    let current_lang = get_language(git_config);
+    println!("{}", current_lang.available_languages());
     println!("1. English");
     println!("2. 简体中文");
 
     let choice = loop {
-        let input = get_user_input("\nSelect a language by number: ")?;
+        let input = get_user_input(&current_lang.select_language_prompt())?;
         match input.parse::<usize>() {
             Ok(1) => break Language::English,
             Ok(2) => break Language::Chinese,
-            _ => println!("Invalid selection. Please try again."),
+            _ => println!("{}", current_lang.invalid_selection()),
         }
     };
 
     git_config.set(CONFIG_LANGUAGE_KEY, choice.to_string())?;
-    println!("Language set to: {}", choice.display_name());
+    println!("{}", choice.language_set_to().replace("{}", &choice.display_name()));
     Ok(choice)
 }
 
@@ -406,31 +596,31 @@ fn get_language(git_config: &GitConfig) -> Language {
         .unwrap_or(Language::English)
 }
 
-fn select_default_model(git_config: &mut GitConfig) -> Result<String> {
-    println!("Fetching available Ollama models...");
+fn select_default_model(git_config: &mut GitConfig, language: &Language) -> Result<String> {
+    println!("{}", language.fetching_models());
     
     let models = get_ollama_models()?;
     if models.is_empty() {
-        return Err("No models found in Ollama. Please ensure Ollama is running and has models installed.".into());
+        return Err(language.no_models_found().into());
     }
 
-    println!("\nAvailable models:");
+    println!("{}", language.available_models());
     for (i, model) in models.iter().enumerate() {
         println!("{}. {}", i + 1, model);
     }
 
     let choice = loop {
-        let input = get_user_input("\nSelect a model by number: ")?;
+        let input = get_user_input(&language.select_model_prompt())?;
         match input.parse::<usize>() {
             Ok(num) if num > 0 && num <= models.len() => break num - 1,
-            _ => println!("Invalid selection. Please try again."),
+            _ => println!("{}", language.invalid_selection()),
         }
     };
 
     let selected_model = models[choice].clone();
     git_config.set(CONFIG_MODEL_KEY, &selected_model)?;
     
-    println!("Model '{selected_model}' set as default.");
+    println!("{}", language.model_set_as_default().replace("{}", &selected_model));
     Ok(selected_model)
 }
 
@@ -439,8 +629,9 @@ fn is_ollama_running() -> Result<bool> {
     match client.get(format!("{OLLAMA_API_BASE}/tags")).send() {
         Ok(response) => Ok(response.status().is_success()),
         Err(e) => {
-            eprintln!("Warning: Failed to connect to Ollama: {}", e);
-            eprintln!("Please ensure Ollama is running on localhost:11434");
+            let language = Language::English;
+            eprintln!("{}", language.ollama_connection_warning().replace("{}", &e.to_string()));
+            eprintln!("{}", language.ensure_ollama_running());
             Ok(false)
         }
     }
@@ -455,9 +646,10 @@ fn main() -> Result<()> {
     }
     
     let mut git_config = GitConfig::new()?;
+    let language = get_language(&git_config);
     
     if args.len() > 1 && args[1] == "model" {
-        select_default_model(&mut git_config)?;
+        select_default_model(&mut git_config, &language)?;
         return Ok(());
     }
 
@@ -467,22 +659,20 @@ fn main() -> Result<()> {
     }
 
     if !is_ollama_running()? {
-        return Err("Ollama is not running or not accessible. Please start Ollama and ensure it's running on localhost:11434, then try again.".into());
+        return Err(language.ollama_not_accessible().into());
     }
     
     let model = match git_config.get(CONFIG_MODEL_KEY) {
         Ok(model) => model,
         Err(_) => {
-            println!("No default model set. Please select a model.");
-            select_default_model(&mut git_config)?
+            println!("{}", language.no_default_model());
+            select_default_model(&mut git_config, &language)?
         }
     };
 
-    let language = get_language(&git_config);
-
     let current_dir = env::current_dir()?;
     let repo_path = find_git_repository(&current_dir)
-        .ok_or("Not in a git repository")?;
+        .ok_or_else(|| AppError::Custom(language.not_in_git_repository().to_string()))?;
 
     let repo = Repository::open(repo_path)?;
     let mut index = repo.index()?;
@@ -490,7 +680,7 @@ fn main() -> Result<()> {
     env::set_current_dir(repo.path().parent().unwrap())?;
 
     if index.add_all(["*"], IndexAddOption::DEFAULT, None).is_err() {
-        println!("No changes staged for commit.");
+        println!("{}", language.no_changes_staged());
         return Ok(());
     }
 
@@ -498,26 +688,24 @@ fn main() -> Result<()> {
     let mut commit_msg = analyze_diff(&diff, &model, &language)?;
 
     loop {
-        let choice = get_user_input(
-            "\nDo you want to (u)se this message, (e)dit it, or (c)ancel? [u/e/c]: ",
-        )?;
+        let choice = get_user_input(&language.use_edit_cancel_prompt())?;
 
         match choice.to_lowercase().as_str() {
             "u" => break,
             "e" => {
-                commit_msg = get_user_input("Enter your commit message (use multiple lines if needed, end with an empty line):\n")?;
+                commit_msg = get_user_input(&language.enter_commit_message())?;
                 break;
             }
             "c" => {
-                println!("Commit cancelled.");
+                println!("{}", language.commit_cancelled());
                 return Ok(());
             }
-            _ => println!("Invalid choice. Please try again."),
+            _ => println!("{}", language.invalid_choice()),
         }
     }
 
-    let name = git_config.get_or_prompt("user.name", "Enter your name: ")?;
-    let email = git_config.get_or_prompt("user.email", "Enter your email: ")?;
+    let name = git_config.get_or_prompt("user.name", &language.enter_name_prompt())?;
+    let email = git_config.get_or_prompt("user.email", &language.enter_email_prompt())?;
 
     let signature = Signature::now(&name, &email)?;
     let tree_id = index.write_tree()?;
@@ -533,8 +721,8 @@ fn main() -> Result<()> {
         &[&parent_commit],
     )?;
 
-    println!("\nChanges committed successfully.");
-    println!("Commit message:\n{commit_msg}");
+    println!("{}", language.changes_committed());
+    println!("{}", language.commit_message_label().replace("{}", &commit_msg));
 
     Ok(())
 }

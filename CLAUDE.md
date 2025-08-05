@@ -8,7 +8,7 @@ Git Commit Analyzer is a Rust-based Git plugin that uses Ollama AI to generate m
 ## Core Architecture
 - **Primary Language**: Rust (edition 2021) for CLI tool
 - **Extension Language**: TypeScript for VS Code integration
-- **Entry Point**: `src/main.rs:266` - main function handles CLI arguments and orchestrates the workflow
+- **Entry Point**: `src/main.rs:449` - main function handles CLI arguments and orchestrates the workflow
 - **Key Dependencies**: 
   - `git2` for Git operations
   - `reqwest` for Ollama API communication
@@ -35,6 +35,7 @@ npm run compile                 # Compile TypeScript
 npm run watch                   # Watch mode for development
 npm run package                 # Package as .vsix file
 npm run publish                 # Publish to marketplace
+npm run vscode:prepublish       # Prepare for publishing
 ```
 
 ### Manual Installation for Testing
@@ -52,15 +53,15 @@ cd vscode-extension && npm run package
 ## Key Components
 
 ### Core Functions (`src/main.rs`)
-- `main()`: CLI entry point at line 318
-- `analyze_diff()`: AI message generation at line 209 (now supports language parameter)
-- `build_commit_prompt()`: Language-specific prompt generation at line 126
-- `get_diff()`: Gets staged changes via `git diff --cached` at line 88
-- `find_git_repository()`: Locates repo from current directory at line 76
-- `process_ollama_response()`: Post-processes AI output at line 187
-- `select_default_model()`: Interactive model selection at line 339
-- `select_language()`: Interactive language selection at line 312
-- `get_language()`: Gets configured language with English default at line 331
+- `main()`: CLI entry point at line 449
+- `analyze_diff()`: AI message generation at line 210 (now supports language parameter)
+- `build_commit_prompt()`: Language-specific prompt generation at line 127
+- `get_diff()`: Gets staged changes via `git diff --cached` at line 120
+- `find_git_repository()`: Locates repo from current directory at line 108
+- `process_ollama_response()`: Post-processes AI output at line 277
+- `select_default_model()`: Interactive model selection at line 409
+- `select_language()`: Interactive language selection at line 382
+- `get_language()`: Gets configured language with English default at line 401
 
 ### VS Code Extension (`vscode-extension/src/extension.ts`)
 - Command registration: `gitCommitAnalyzer.generateMessage`
@@ -108,3 +109,9 @@ cd vscode-extension && npm run package
 - Language selection with English default
 - Custom error types with unified handling (AppError enum)
 - Binary path discovery for VS Code extension
+
+# important-instruction-reminders
+Do what has been asked; nothing more, nothing less.
+NEVER create files unless they're absolutely necessary for achieving your goal.
+ALWAYS prefer editing an existing file to creating a new one.
+NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
