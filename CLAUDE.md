@@ -8,7 +8,7 @@ Git Commit Analyzer is a Rust-based Git plugin that uses Ollama AI to generate m
 ## Core Architecture
 - **Primary Language**: Rust (edition 2021) for CLI tool
 - **Extension Language**: TypeScript for VS Code integration
-- **Entry Point**: `src/main.rs:640` - main function handles CLI arguments and orchestrates the workflow
+- **Entry Point**: `src/main.rs:645` - main function handles CLI arguments and orchestrates the workflow
 - **Key Dependencies**: 
   - `git2` for Git operations
   - `reqwest` for Ollama API communication
@@ -53,15 +53,15 @@ cd vscode-extension && npm run package
 ## Key Components
 
 ### Core Functions (`src/main.rs`)
-- `main()`: CLI entry point at line 449
-- `analyze_diff()`: AI message generation at line 210 (now supports language parameter)
-- `build_commit_prompt()`: Language-specific prompt generation at line 127
-- `get_diff()`: Gets staged changes via `git diff --cached` at line 120
-- `find_git_repository()`: Locates repo from current directory at line 108
-- `process_ollama_response()`: Post-processes AI output at line 277
-- `select_default_model()`: Interactive model selection at line 409
-- `select_language()`: Interactive language selection at line 382
-- `get_language()`: Gets configured language with English default at line 401
+- `main()`: CLI entry point at line 645
+- `find_git_repository()`: Locates repo from current directory at line 297
+- `get_diff()`: Gets staged changes via `git diff --cached` at line 309
+- `build_commit_prompt()`: Language-specific prompt generation at line 316
+- `analyze_diff()`: AI message generation at line 404 (now supports language parameter)
+- `process_ollama_response()`: Post-processes AI output at line 471
+- `select_language()`: Interactive language selection at line 576
+- `get_language()`: Gets configured language with English default at line 596
+- `select_default_model()`: Interactive model selection at line 604
 
 ### VS Code Extension (`vscode-extension/src/extension.ts`)
 - Command registration: `gitCommitAnalyzer.generateMessage`
@@ -81,6 +81,9 @@ cd vscode-extension && npm run package
 - Model listing via `/tags` endpoint
 - Streaming response handling for real-time generation
 - Connection validation before processing
+- Enforces Git Flow commit message format: `<type>(<scope>): <subject>` with optional body
+- Supported commit types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
+- Generates single commit message per invocation without issue numbers or footers
 
 ## Distribution Methods
 - **Homebrew**: `brew tap zh30/tap && brew install git-ca`
