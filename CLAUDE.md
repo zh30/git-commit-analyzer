@@ -8,7 +8,7 @@ Git Commit Analyzer is a Rust-based Git plugin that uses Ollama AI to generate m
 ## Core Architecture
 - **Primary Language**: Rust (edition 2021) for CLI tool
 - **Extension Language**: TypeScript for VS Code integration
-- **Entry Point**: `src/main.rs:449` - main function handles CLI arguments and orchestrates the workflow
+- **Entry Point**: `src/main.rs:640` - main function handles CLI arguments and orchestrates the workflow
 - **Key Dependencies**: 
   - `git2` for Git operations
   - `reqwest` for Ollama API communication
