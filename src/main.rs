@@ -406,7 +406,7 @@ fn analyze_diff(diff: &str, model: &str, language: &Language) -> Result<String> 
     let prompt = build_commit_prompt(diff, language);
 
     println!("{}", language.generating_commit_message());
-    println!("{}", language.this_may_take_moment());
+    eprintln!("\x1b[90m{}\x1b[0m", language.this_may_take_moment());
     
     let response = client
         .post(format!("{OLLAMA_API_BASE}/generate"))
