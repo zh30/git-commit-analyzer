@@ -335,6 +335,8 @@ Important guidelines:
 4. Do not mention or reference any issue numbers.
 5. Focus solely on the most significant change if there are multiple unrelated changes.
 6. **Ensure that only one commit message is generated.**
+7. **The commit message content must be written in English language.**
+8. **Do not use any other languages except English for the content.**
 
 Here's the diff to analyze:
 
@@ -344,15 +346,15 @@ Your task:
 1. Analyze the given git diff.
 2. **Generate only one** commit message strictly following the Git Flow format described above.
 3. Ensure your response contains **ONLY** the formatted commit message, without any additional explanations or markdown.
-4. The commit message MUST start with <type> and follow the exact structure shown.
+4. **The commit message content (subject and body) must be written in English.**
 
-Example of a valid response:
+Valid response example:
 feat(user-auth): implement password reset functionality
 
 Add a new endpoint for password reset requests.
 Implement email sending for reset links.
 
-Remember: Your response should only include the commit message, nothing else."
+Remember: Your response should only include the English commit message, nothing else."
         ),
         Language::Chinese => format!(
             "分析这个 git diff 并提供一个遵循 Git Flow 格式的提交信息：
@@ -374,6 +376,8 @@ Remember: Your response should only include the commit message, nothing else."
 4. 不要提及或引用任何问题编号。
 5. 如果有多个不相关的变更，只关注最重要的变更。
 6. **确保只生成一个提交信息。**
+7. **提交信息的内容必须使用简体中文，包括主题和正文。**
+8. **不允许使用英文，除了 Git Flow 格式的类型关键字（feat、fix、docs 等）。**
 
 以下是要分析的 diff：
 
@@ -384,6 +388,7 @@ Remember: Your response should only include the commit message, nothing else."
 2. **生成一个**严格遵循上述 Git Flow 格式的提交信息。
 3. 确保你的回复**只**包含格式化的提交信息，不要有任何额外的解释或 markdown。
 4. 提交信息**必须**以 <类型> 开头并遵循所示的确切结构。
+5. **提交信息的内容（主题和正文）必须使用简体中文。**
 
 有效回复的示例：
 feat(用户认证): 实现密码重置功能
@@ -391,7 +396,7 @@ feat(用户认证): 实现密码重置功能
 添加密码重置请求的新端点。
 实现重置链接的邮件发送。
 
-记住：你的回复应该只包含提交信息，不要有其他内容。"
+记住：你的回复应该只包含中文的提交信息，不要有其他内容。"
         )
     }
 }
