@@ -22,9 +22,24 @@ Git 提交分析器是一个强大的 Git 插件，它利用人工智能根据�
 
 ## 安装
 
+### 🚀 一键安装（推荐）
+
+最快的安装方式，只需一行命令即可完成所有安装步骤：
+
+```bash
+bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
+```
+
+这将自动完成：
+- 检测您的操作系统
+- 安装所有依赖（Git、Rust、Ollama）
+- 构建并安装插件
+- 配置环境变量
+- 设置 Git 配置
+
 ### Homebrew（macOS 和 Linux）
 
-安装 Git 提交分析器最简单的方法是通过 Homebrew：
+或者，您也可以通过 Homebrew 安装：
 
 ```
 brew tap zh30/tap

@@ -22,9 +22,24 @@ Analyseur de Commits Git est un puissant plugin Git qui utilise l'IA pour géné
 
 ## Installation
 
+### 🚀 Installation en un Clic (Recommandée)
+
+La méthode la plus rapide pour installer Git Commit Analyzer avec une seule commande :
+
+```bash
+bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
+```
+
+Cela automatiquement :
+- Détecter votre système d'exploitation
+- Installer toutes les dépendances (Git, Rust, Ollama)
+- Construire et installer le plugin
+- Configurer votre environnement
+- Configurer Git
+
 ### Homebrew (macOS et Linux)
 
-La façon la plus simple d'installer Git Commit Analyzer est via Homebrew :
+Alternativement, vous pouvez installer via Homebrew :
 
 ```
 brew tap zh30/tap

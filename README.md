@@ -22,9 +22,24 @@ Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically 
 
 ## Installation
 
+### 🚀 One-Click Installation (Recommended)
+
+The fastest way to install Git Commit Analyzer with a single command:
+
+```bash
+bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
+```
+
+This will automatically:
+- Detect your operating system
+- Install all dependencies (Git, Rust, Ollama)
+- Build and install the plugin
+- Configure your environment
+- Set up Git configuration
+
 ### Homebrew (macOS and Linux)
 
-The easiest way to install Git Commit Analyzer is via Homebrew:
+Alternatively, you can install via Homebrew:
 
 ```
 brew tap zh30/tap
