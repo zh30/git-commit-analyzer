@@ -2,23 +2,26 @@
 
 [中文](README_ZH.md) | [Français](README_FR.md) | [Español](README_ES.md)
 
-Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically generate meaningful commit messages based on your staged changes. It uses Ollama to analyze git diffs and propose commit messages following the Git Flow format.
+Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically generate meaningful commit messages based on your staged changes. It uses MLX to analyze git diffs and propose commit messages following the Git Flow format, optimized for Apple Silicon devices.
 
 ## Features
 
 - Automatic generation of Git Flow compliant commit messages
-- Powered by Ollama for local AI processing
+- Powered by MLX for local AI processing on Apple Silicon
 - Interactive mode allowing users to use, edit, or cancel the proposed commit message
 - Multi-language support (English and Simplified Chinese)
-- Cross-platform compatibility (Linux, macOS, Windows)
+- Cross-platform compatibility (macOS optimized, Linux support planned)
 - Customizable with your personal Git signature
 - Support for model selection and persistence
+- Extremely fast inference with lightweight models
 
 ## Prerequisites
 
 - Git (version 2.0 or later)
-- Ollama installed and running (https://ollama.com/download)
-- At least one language model installed in Ollama
+- Python 3.8 or later
+- Apple Silicon Mac (M1/M2/M3 or later)
+- MLX-LM installed: `pip install mlx-lm`
+- macOS 13.0 (Ventura) or later
 
 ## Installation
 
@@ -32,7 +35,8 @@ bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
 
 This will automatically:
 - Detect your operating system
-- Install all dependencies (Git, Rust, Ollama)
+- Install all dependencies (Git, Rust, Python)
+- Install MLX-LM for Apple Silicon
 - Build and install the plugin
 - Configure your environment
 - Set up Git configuration
@@ -125,8 +129,9 @@ After installation, you can use Git Commit Analyzer in any Git repository:
    git ca
    ```
 
-3. If it's your first time running the command, you'll be prompted to select a model from your installed Ollama models.
-4. The program will analyze your staged changes and generate a suggested commit message.
+3. If it's your first time running the command, you'll be prompted to select a model from the available MLX models.
+4. Install MLX-LM if prompted: `pip install mlx-lm`
+5. The program will analyze your staged changes and generate a suggested commit message.
 5. You can choose to use the suggested message, edit it, or cancel the commit.
 
 ### Configuration Commands
@@ -160,4 +165,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - The Rust community for providing excellent libraries and tools
-- Ollama for providing local AI model support
+- MLX for providing local AI model support on Apple Silicon

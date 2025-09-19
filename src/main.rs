@@ -1,18 +1,24 @@
 use git2::{Config, IndexAddOption, Repository, Signature};
-use reqwest::blocking::Client;
-use reqwest::header::{HeaderMap, HeaderValue, HOST};
-use serde_json::{json, Value};
 use std::env;
 use std::fmt;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::Duration;
+use std::process::{Command, Stdio};
 
-const OLLAMA_API_BASE: &str = "http://localhost:11434/api";
 const CONFIG_MODEL_KEY: &str = "commit-analyzer.model";
 const CONFIG_LANGUAGE_KEY: &str = "commit-analyzer.language";
 const COMMIT_TYPES: &[&str] = &["feat", "fix", "docs", "style", "refactor", "test", "chore"];
+
+// Available MLX models
+const MLX_MODELS: &[&str] = &[
+    "gemma-3-270m-it-6bit",
+    "gemma-2b-it",
+    "mistral-7b-instruct-v0.3-4bit",
+    "llama-3-8b-instruct-4bit",
+    "phi-3-mini-4k-instruct-4bit",
+];
+
+const DEFAULT_MLX_MODEL: &str = "gemma-3-270m-it-6bit";
 
 #[derive(Debug, Clone, PartialEq)]
 enum Language {
@@ -57,6 +63,7 @@ impl Language {
         }
     }
 
+    #[allow(dead_code)]
     fn processing_response(&self) -> &'static str {
         match self {
             Language::English => "Processing response...",
@@ -99,10 +106,11 @@ impl Language {
         }
     }
 
+    #[allow(dead_code)]
     fn fetching_models(&self) -> &'static str {
         match self {
-            Language::English => "Fetching available Ollama models...",
-            Language::Chinese => "正在获取可用的 Ollama 模型...",
+            Language::English => "Fetching available MLX models...",
+            Language::Chinese => "正在获取可用的 MLX 模型...",
         }
     }
 
@@ -127,20 +135,25 @@ impl Language {
         }
     }
 
-    fn ollama_connection_warning(&self) -> &'static str {
+    #[allow(dead_code)]
+    fn mlx_dependency_warning(&self) -> &'static str {
         match self {
-            Language::English => "Warning: Failed to connect to Ollama: {}",
-            Language::Chinese => "警告：连接 Ollama 失败：{}",
+            Language::English => "Warning: MLX dependency check failed: {}",
+            Language::Chinese => "警告：MLX 依赖检查失败：{}",
         }
     }
 
-    fn ensure_ollama_running(&self) -> &'static str {
+    #[allow(dead_code)]
+    fn ensure_mlx_installed(&self) -> &'static str {
         match self {
-            Language::English => "Please ensure Ollama is running on localhost:11434",
-            Language::Chinese => "请确保 Ollama 正在 localhost:11434 上运行",
+            Language::English => {
+                "Please ensure Python3 and MLX-LM are installed: pip install mlx-lm"
+            }
+            Language::Chinese => "请确保已安装 Python3 和 MLX-LM：pip install mlx-lm",
         }
     }
 
+    #[allow(dead_code)]
     fn no_default_model(&self) -> &'static str {
         match self {
             Language::English => "No default model set. Please select a model.",
@@ -157,7 +170,9 @@ impl Language {
 
     fn use_edit_cancel_prompt(&self) -> &'static str {
         match self {
-            Language::English => "\nDo you want to (u)se this message, (e)dit it, or (c)ancel? [u/e/c]: ",
+            Language::English => {
+                "\nDo you want to (u)se this message, (e)dit it, or (c)ancel? [u/e/c]: "
+            }
             Language::Chinese => "\n您想要 (u) 使用此信息，(e) 编辑它，还是 (c) 取消？[u/e/c]：",
         }
     }
@@ -211,17 +226,20 @@ impl Language {
         }
     }
 
-    fn ollama_not_accessible(&self) -> &'static str {
+    fn mlx_not_configured(&self) -> &'static str {
         match self {
-            Language::English => "Ollama is not running or not accessible. Please start Ollama and ensure it's running on localhost:11434, then try again.",
-            Language::Chinese => "Ollama 未运行或不可访问。请启动 Ollama 并确保它在 localhost:11434 上运行，然后重试。",
+            Language::English => "MLX environment not properly configured. Please ensure Python3 and MLX-LM are installed, then try again.",
+            Language::Chinese => "MLX 环境配置不正确。请确保已安装 Python3 和 MLX-LM，然后重试。",
         }
     }
 
+    #[allow(dead_code)]
     fn no_models_found(&self) -> &'static str {
         match self {
-            Language::English => "No models found in Ollama. Please ensure Ollama is running and has models installed.",
-            Language::Chinese => "在 Ollama 中未找到模型。请确保 Ollama 正在运行并已安装模型。",
+            Language::English => {
+                "No MLX models available. Please ensure MLX-LM is properly installed."
+            }
+            Language::Chinese => "未找到可用的 MLX 模型。请确保 MLX-LM 已正确安装。",
         }
     }
 
@@ -237,8 +255,6 @@ impl Language {
 enum AppError {
     Git(git2::Error),
     Io(io::Error),
-    Http(reqwest::Error),
-    Json(serde_json::Error),
     Custom(String),
 }
 
@@ -247,8 +263,6 @@ impl fmt::Display for AppError {
         match self {
             AppError::Git(e) => write!(f, "Git error: {e}"),
             AppError::Io(e) => write!(f, "IO error: {e}"),
-            AppError::Http(e) => write!(f, "HTTP error: {e}"),
-            AppError::Json(e) => write!(f, "JSON error: {e}"),
             AppError::Custom(msg) => write!(f, "{msg}"),
         }
     }
@@ -265,18 +279,6 @@ impl From<git2::Error> for AppError {
 impl From<io::Error> for AppError {
     fn from(err: io::Error) -> Self {
         AppError::Io(err)
-    }
-}
-
-impl From<reqwest::Error> for AppError {
-    fn from(err: reqwest::Error) -> Self {
-        AppError::Http(err)
-    }
-}
-
-impl From<serde_json::Error> for AppError {
-    fn from(err: serde_json::Error) -> Self {
-        AppError::Json(err)
     }
 }
 
@@ -313,6 +315,7 @@ fn get_diff() -> Result<String> {
     Ok(diff)
 }
 
+#[allow(dead_code)]
 fn build_commit_prompt(diff: &str, language: &Language) -> String {
     match language {
         Language::English => format!(
@@ -402,75 +405,131 @@ feat(用户认证): 实现密码重置功能
 }
 
 fn analyze_diff(diff: &str, model: &str, language: &Language) -> Result<String> {
-    let client = create_generation_client()?;
-    let prompt = build_commit_prompt(diff, language);
-
     println!("{}", language.generating_commit_message());
     eprintln!("\x1b[90m{}\x1b[0m", language.this_may_take_moment());
-    
-    let response = client
-        .post(format!("{OLLAMA_API_BASE}/generate"))
-        .json(&json!({
-            "model": model,
-            "prompt": prompt,
-            "stream": true
-        }))
-        .send()
-        .map_err(|e| {
-            if e.is_timeout() {
-                AppError::Custom(format!(
-                    "Request timed out after 2 minutes. This might happen with large models or slow systems.\n\
-                    Try using a smaller/faster model with 'git ca model' or ensure your system has sufficient resources."
-                ))
-            } else if e.is_connect() {
-                AppError::Custom(format!(
-                    "Failed to connect to Ollama at {}. Please ensure Ollama is running and accessible.",
-                    OLLAMA_API_BASE
-                ))
-            } else {
-                AppError::Custom(format!("Network error: {}", e))
-            }
-        })?;
 
-    if !response.status().is_success() {
+    // Build the Python command
+    let mut command = Command::new("python3");
+    command
+        .arg("generate_commit.py")
+        .arg("--diff")
+        .arg(diff)
+        .arg("--model")
+        .arg(model)
+        .arg("--language")
+        .arg(language.to_string())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| AppError::Custom(format!("Failed to start Python script: {}", e)))?;
+
+    // Capture output in real-time
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| AppError::Custom("Failed to capture stdout".to_string()))?;
+
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| AppError::Custom("Failed to capture stderr".to_string()))?;
+
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+
+    let output_arc = Arc::new(Mutex::new(Vec::new()));
+    let error_output_arc = Arc::new(Mutex::new(Vec::new()));
+
+    // Handle stdout in a separate thread
+    let stdout_handle = {
+        let output_clone = output_arc.clone();
+        thread::spawn(move || {
+            use io::Read;
+            let mut buffer = [0; 1024];
+            loop {
+                match stdout.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let chunk = &buffer[..n];
+                        // Print to console for user feedback
+                        io::stdout().write_all(chunk).unwrap();
+                        io::stdout().flush().unwrap();
+                        if let Ok(mut output) = output_clone.lock() {
+                            output.extend_from_slice(chunk);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+    };
+
+    // Handle stderr in a separate thread
+    let stderr_handle = {
+        let error_output_clone = error_output_arc.clone();
+        thread::spawn(move || {
+            use io::Read;
+            let mut buffer = [0; 1024];
+            loop {
+                match stderr.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if let Ok(mut error_output) = error_output_clone.lock() {
+                            error_output.extend_from_slice(&buffer[..n]);
+                        }
+                        // Print stderr to stderr
+                        io::stderr().write_all(&buffer[..n]).unwrap();
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+    };
+
+    // Wait for both threads to complete
+    stdout_handle
+        .join()
+        .map_err(|_| AppError::Custom("Error waiting for stdout thread".to_string()))?;
+    stderr_handle
+        .join()
+        .map_err(|_| AppError::Custom("Error waiting for stderr thread".to_string()))?;
+
+    // Wait for the process to complete
+    let status = child
+        .wait()
+        .map_err(|e| AppError::Custom(format!("Failed to wait for Python process: {}", e)))?;
+
+    if !status.success() {
+        let error_msg = if let Ok(error_output) = error_output_arc.lock() {
+            if !error_output.is_empty() {
+                String::from_utf8_lossy(&error_output).to_string()
+            } else {
+                format!("Python script exited with status: {}", status)
+            }
+        } else {
+            format!("Python script exited with status: {}", status)
+        };
         return Err(AppError::Custom(format!(
-            "Unable to get response from Ollama. Status code: {}. Please ensure Ollama is running and accessible.",
-            response.status()
+            "MLX generation failed: {}",
+            error_msg
         )));
     }
 
-    let mut full_response = String::new();
-    let reader = BufReader::new(response);
-    io::stdout().flush()?;
-
-    println!("{}", language.processing_response());
-
-    for line in reader.lines() {
-        let line = line.map_err(|e| AppError::Custom(format!("Failed to read response: {}", e)))?;
-        if line.is_empty() {
-            continue;
-        }
-
-        if let Ok(json) = serde_json::from_str::<Value>(&line) {
-            if let Some(response_part) = json["response"].as_str() {
-                print!("{response_part}");
-                io::stdout().flush()?;
-                full_response.push_str(response_part);
-            }
-            
-            if json["done"].as_bool().unwrap_or(false) {
-                break;
-            }
-        }
-    }
-    
+    let response = if let Ok(output) = output_arc.lock() {
+        String::from_utf8_lossy(&output).to_string()
+    } else {
+        String::new()
+    };
     println!("{}", language.commit_message_generated());
-    Ok(process_ollama_response(&full_response))
+    Ok(process_mlx_response(&response))
 }
 
-fn process_ollama_response(response: &str) -> String {
+fn process_mlx_response(response: &str) -> String {
     let response_without_thinking = if response.trim_start().starts_with("<think>") {
-        response.find("</think>")
+        response
+            .find("</think>")
             .map(|end_index| response[(end_index + "</think>".len())..].trim_start())
             .unwrap_or(response)
     } else {
@@ -536,41 +595,8 @@ impl GitConfig {
     }
 }
 
-fn create_http_client() -> Result<Client> {
-    Ok(Client::builder().timeout(Duration::from_secs(5)).build()?)
-}
-
-fn create_generation_client() -> Result<Client> {
-    let mut headers = HeaderMap::new();
-    headers.insert(HOST, HeaderValue::from_static("localhost:11434"));
-    
-    Ok(Client::builder()
-        .timeout(Duration::from_secs(120))  // 2 minutes for AI generation
-        .default_headers(headers)
-        .build()?)
-}
-
-fn get_ollama_models() -> Result<Vec<String>> {
-    let client = create_http_client()?;
-    let response = client.get(format!("{OLLAMA_API_BASE}/tags")).send()?;
-
-    if !response.status().is_success() {
-        return Err(AppError::Custom(format!(
-            "Unable to get models from Ollama. Status code: {}",
-            response.status()
-        )));
-    }
-
-    let data: Value = response.json()?;
-    let models = data["models"]
-        .as_array()
-        .ok_or("Invalid response format")?
-        .iter()
-        .filter_map(|model| model["name"].as_str())
-        .map(String::from)
-        .collect();
-
-    Ok(models)
+fn get_mlx_models() -> Result<Vec<String>> {
+    Ok(MLX_MODELS.iter().map(|s| s.to_string()).collect())
 }
 
 fn select_language(git_config: &mut GitConfig) -> Result<Language> {
@@ -580,7 +606,7 @@ fn select_language(git_config: &mut GitConfig) -> Result<Language> {
     println!("2. 简体中文");
 
     let choice = loop {
-        let input = get_user_input(&current_lang.select_language_prompt())?;
+        let input = get_user_input(current_lang.select_language_prompt())?;
         match input.parse::<usize>() {
             Ok(1) => break Language::English,
             Ok(2) => break Language::Chinese,
@@ -589,7 +615,12 @@ fn select_language(git_config: &mut GitConfig) -> Result<Language> {
     };
 
     git_config.set(CONFIG_LANGUAGE_KEY, choice.to_string())?;
-    println!("{}", choice.language_set_to().replace("{}", &choice.display_name()));
+    println!(
+        "{}",
+        choice
+            .language_set_to()
+            .replace("{}", choice.display_name())
+    );
     Ok(choice)
 }
 
@@ -602,20 +633,25 @@ fn get_language(git_config: &GitConfig) -> Language {
 }
 
 fn select_default_model(git_config: &mut GitConfig, language: &Language) -> Result<String> {
-    println!("{}", language.fetching_models());
-    
-    let models = get_ollama_models()?;
+    println!("Fetching available MLX models...");
+
+    let models = get_mlx_models()?;
     if models.is_empty() {
-        return Err(language.no_models_found().into());
+        return Err("No MLX models available".into());
     }
 
     println!("{}", language.available_models());
     for (i, model) in models.iter().enumerate() {
-        println!("{}. {}", i + 1, model);
+        // Add description for the default model
+        if model == DEFAULT_MLX_MODEL {
+            println!("{}. {} (Default - Fast & Efficient)", i + 1, model);
+        } else {
+            println!("{}. {}", i + 1, model);
+        }
     }
 
     let choice = loop {
-        let input = get_user_input(&language.select_model_prompt())?;
+        let input = get_user_input(language.select_model_prompt())?;
         match input.parse::<usize>() {
             Ok(num) if num > 0 && num <= models.len() => break num - 1,
             _ => println!("{}", language.invalid_selection()),
@@ -624,19 +660,44 @@ fn select_default_model(git_config: &mut GitConfig, language: &Language) -> Resu
 
     let selected_model = models[choice].clone();
     git_config.set(CONFIG_MODEL_KEY, &selected_model)?;
-    
-    println!("{}", language.model_set_as_default().replace("{}", &selected_model));
+
+    println!(
+        "{}",
+        language
+            .model_set_as_default()
+            .replace("{}", &selected_model)
+    );
     Ok(selected_model)
 }
 
-fn is_ollama_running() -> Result<bool> {
-    let client = create_http_client()?;
-    match client.get(format!("{OLLAMA_API_BASE}/tags")).send() {
-        Ok(response) => Ok(response.status().is_success()),
-        Err(e) => {
-            let language = Language::English;
-            eprintln!("{}", language.ollama_connection_warning().replace("{}", &e.to_string()));
-            eprintln!("{}", language.ensure_ollama_running());
+fn check_python_mlx() -> Result<bool> {
+    // Check if Python is available
+    match Command::new("python3").arg("--version").output() {
+        Ok(_) => {
+            // Check if mlx-lm is installed
+            match Command::new("python3")
+                .arg("-c")
+                .arg("import mlx_lm; print('MLX-LM available')")
+                .output()
+            {
+                Ok(output) => {
+                    if output.status.success() {
+                        Ok(true)
+                    } else {
+                        let error = String::from_utf8_lossy(&output.stderr);
+                        eprintln!("Warning: MLX-LM not installed. Please install with: pip install mlx-lm");
+                        eprintln!("Error details: {}", error);
+                        Ok(false)
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to check MLX-LM: {}", e);
+                    Ok(false)
+                }
+            }
+        }
+        Err(_) => {
+            eprintln!("Warning: Python3 not found. Please install Python 3 to use MLX models.");
             Ok(false)
         }
     }
@@ -644,15 +705,15 @@ fn is_ollama_running() -> Result<bool> {
 
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
-    
+
     if args.len() > 1 && (args[1] == "--version" || args[1] == "-v") {
         println!("git-ca version {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
-    
+
     let mut git_config = GitConfig::new()?;
     let language = get_language(&git_config);
-    
+
     if args.len() > 1 && args[1] == "model" {
         select_default_model(&mut git_config, &language)?;
         return Ok(());
@@ -663,15 +724,18 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    if !is_ollama_running()? {
-        return Err(language.ollama_not_accessible().into());
+    if !check_python_mlx()? {
+        return Err(language.mlx_not_configured().into());
     }
-    
+
     let model = match git_config.get(CONFIG_MODEL_KEY) {
         Ok(model) => model,
         Err(_) => {
-            println!("{}", language.no_default_model());
-            select_default_model(&mut git_config, &language)?
+            println!("No default MLX model set. Selecting default model...");
+            // Set default model automatically
+            git_config.set(CONFIG_MODEL_KEY, DEFAULT_MLX_MODEL)?;
+            println!("Using default model: {}", DEFAULT_MLX_MODEL);
+            DEFAULT_MLX_MODEL.to_string()
         }
     };
 
@@ -693,12 +757,12 @@ fn main() -> Result<()> {
     let mut commit_msg = analyze_diff(&diff, &model, &language)?;
 
     loop {
-        let choice = get_user_input(&language.use_edit_cancel_prompt())?;
+        let choice = get_user_input(language.use_edit_cancel_prompt())?;
 
         match choice.to_lowercase().as_str() {
             "u" => break,
             "e" => {
-                commit_msg = get_user_input(&language.enter_commit_message())?;
+                commit_msg = get_user_input(language.enter_commit_message())?;
                 break;
             }
             "c" => {
@@ -709,8 +773,8 @@ fn main() -> Result<()> {
         }
     }
 
-    let name = git_config.get_or_prompt("user.name", &language.enter_name_prompt())?;
-    let email = git_config.get_or_prompt("user.email", &language.enter_email_prompt())?;
+    let name = git_config.get_or_prompt("user.name", language.enter_name_prompt())?;
+    let email = git_config.get_or_prompt("user.email", language.enter_email_prompt())?;
 
     let signature = Signature::now(&name, &email)?;
     let tree_id = index.write_tree()?;
@@ -727,7 +791,10 @@ fn main() -> Result<()> {
     )?;
 
     println!("{}", language.changes_committed());
-    println!("{}", language.commit_message_label().replace("{}", &commit_msg));
+    println!(
+        "{}",
+        language.commit_message_label().replace("{}", &commit_msg)
+    );
 
     Ok(())
 }
