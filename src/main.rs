@@ -1,22 +1,18 @@
 use git2::{Config, IndexAddOption, Repository, Signature};
 use std::env;
 use std::fmt;
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const CONFIG_MODEL_KEY: &str = "commit-analyzer.model";
+mod mlx;
+
+#[cfg(feature = "mlx")]
+mod mlx_bridge;
+
 const CONFIG_LANGUAGE_KEY: &str = "commit-analyzer.language";
 const COMMIT_TYPES: &[&str] = &["feat", "fix", "docs", "style", "refactor", "test", "chore"];
-
-// Available MLX models
-const MLX_MODELS: &[&str] = &[
-    "gemma-3-270m-it-6bit",
-    "gemma-2b-it",
-    "mistral-7b-instruct-v0.3-4bit",
-    "llama-3-8b-instruct-4bit",
-    "phi-3-mini-4k-instruct-4bit",
-];
 
 const DEFAULT_MLX_MODEL: &str = "gemma-3-270m-it-6bit";
 
@@ -106,36 +102,6 @@ impl Language {
         }
     }
 
-    #[allow(dead_code)]
-    fn fetching_models(&self) -> &'static str {
-        match self {
-            Language::English => "Fetching available MLX models...",
-            Language::Chinese => "正在获取可用的 MLX 模型...",
-        }
-    }
-
-    fn available_models(&self) -> &'static str {
-        match self {
-            Language::English => "\nAvailable models:",
-            Language::Chinese => "\n可用模型：",
-        }
-    }
-
-    fn select_model_prompt(&self) -> &'static str {
-        match self {
-            Language::English => "\nSelect a model by number: ",
-            Language::Chinese => "\n请输入模型编号：",
-        }
-    }
-
-    fn model_set_as_default(&self) -> &'static str {
-        match self {
-            Language::English => "Model '{}' set as default.",
-            Language::Chinese => "已将模型'{}'设置为默认模型。",
-        }
-    }
-
-    #[allow(dead_code)]
     fn mlx_dependency_warning(&self) -> &'static str {
         match self {
             Language::English => "Warning: MLX dependency check failed: {}",
@@ -150,6 +116,58 @@ impl Language {
                 "Please ensure Python3 and MLX-LM are installed: pip install mlx-lm"
             }
             Language::Chinese => "请确保已安装 Python3 和 MLX-LM：pip install mlx-lm",
+        }
+    }
+
+    fn installing_mlx(&self) -> &'static str {
+        match self {
+            Language::English => "Attempting to install MLX-LM with pip...",
+            Language::Chinese => "正在通过 pip 自动安装 MLX-LM...",
+        }
+    }
+
+    fn mlx_install_success(&self) -> &'static str {
+        match self {
+            Language::English => "MLX-LM installed successfully.",
+            Language::Chinese => "MLX-LM 已成功安装。",
+        }
+    }
+
+    fn mlx_install_failed(&self) -> &'static str {
+        match self {
+            Language::English => "Automatic MLX-LM installation failed: {}",
+            Language::Chinese => "自动安装 MLX-LM 失败：{}",
+        }
+    }
+
+    fn python_missing_warning(&self) -> &'static str {
+        match self {
+            Language::English => {
+                "Warning: Python3 not found. Automatic MLX setup requires Python 3."
+            }
+            Language::Chinese => "警告：未找到 Python3。自动配置 MLX 需要安装 Python 3。",
+        }
+    }
+
+    fn installing_pip(&self) -> &'static str {
+        match self {
+            Language::English => "Bootstrapping pip for the current Python environment...",
+            Language::Chinese => "正在为当前 Python 环境初始化 pip...",
+        }
+    }
+
+    #[allow(dead_code)]
+    fn pip_missing_warning(&self) -> &'static str {
+        match self {
+            Language::English => "pip is not available yet: {}",
+            Language::Chinese => "pip 尚不可用：{}",
+        }
+    }
+
+    fn pip_install_failed(&self) -> &'static str {
+        match self {
+            Language::English => "Unable to prepare pip: {}",
+            Language::Chinese => "无法准备 pip：{}",
         }
     }
 
@@ -404,12 +422,12 @@ feat(用户认证): 实现密码重置功能
     }
 }
 
-fn analyze_diff(diff: &str, model: &str, language: &Language) -> Result<String> {
+fn analyze_diff(diff: &str, model: &str, language: &Language, python: &Path) -> Result<String> {
     println!("{}", language.generating_commit_message());
     eprintln!("\x1b[90m{}\x1b[0m", language.this_may_take_moment());
 
     // Build the Python command
-    let mut command = Command::new("python3");
+    let mut command = Command::new(python);
     command
         .arg("generate_commit.py")
         .arg("--diff")
@@ -523,10 +541,10 @@ fn analyze_diff(diff: &str, model: &str, language: &Language) -> Result<String> 
         String::new()
     };
     println!("{}", language.commit_message_generated());
-    Ok(process_mlx_response(&response))
+    Ok(process_mlx_response(&response, diff, language))
 }
 
-fn process_mlx_response(response: &str) -> String {
+fn process_mlx_response(response: &str, diff: &str, language: &Language) -> String {
     let response_without_thinking = if response.trim_start().starts_with("<think>") {
         response
             .find("</think>")
@@ -536,24 +554,147 @@ fn process_mlx_response(response: &str) -> String {
         response
     };
 
-    let lines: Vec<&str> = response_without_thinking
-        .lines()
-        .filter(|line| !line.starts_with("Fixes #") && !line.starts_with("Closes #"))
-        .collect();
+    let mut best_line: Option<String> = None;
 
-    let mut processed_lines = Vec::new();
-    let mut started = false;
-
-    for line in lines {
-        if !started && COMMIT_TYPES.iter().any(|&t| line.starts_with(t)) {
-            started = true;
+    for raw_line in response_without_thinking.lines() {
+        let line = raw_line.trim();
+        if line.is_empty()
+            || line.starts_with("```")
+            || line.starts_with("git diff")
+            || line.starts_with("diff --")
+            || line.starts_with("@@")
+            || line.starts_with("+")
+            || line.starts_with("-")
+            || line.starts_with("#")
+            || line.starts_with("<type>")
+            || line.starts_with("<类型>")
+        {
+            continue;
         }
-        if started {
-            processed_lines.push(line);
+
+        if is_valid_commit_line(line) {
+            best_line = Some(line.to_string());
+            break;
         }
     }
 
-    processed_lines.join("\n")
+    if let Some(line) = best_line {
+        return line;
+    }
+
+    fallback_commit_message(diff, language)
+}
+
+fn is_valid_commit_line(line: &str) -> bool {
+    if line.is_empty() {
+        return false;
+    }
+
+    let lower = line.to_lowercase();
+    if !COMMIT_TYPES.iter().any(|kind| lower.starts_with(kind)) {
+        return false;
+    }
+
+    lower.contains(':') && !lower.starts_with("```")
+}
+
+fn fallback_commit_message(diff: &str, language: &Language) -> String {
+    let path = extract_primary_path(diff).unwrap_or_else(|| "project".to_string());
+    let commit_type = guess_commit_type(&path);
+    let scope = guess_scope(&path);
+    let subject = guess_subject(&path, &commit_type, language);
+
+    format_commit_line(&commit_type, scope.as_deref(), &subject)
+}
+
+fn extract_primary_path(diff: &str) -> Option<String> {
+    for line in diff.lines() {
+        if let Some(rest) = line.strip_prefix("diff --git ") {
+            let mut parts = rest.split_whitespace();
+            let _ = parts.next()?; // a/path
+            let b = parts.next()?; // b/path
+            let path = b.trim_start_matches('b').trim_start_matches('/');
+            if !path.is_empty() {
+                return Some(path.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn guess_commit_type(path: &str) -> String {
+    let lower = path.to_lowercase();
+    let commit_type = if lower.ends_with(".md")
+        || lower.ends_with(".rst")
+        || lower.contains("docs/")
+        || lower.contains("/docs")
+    {
+        "docs"
+    } else if lower.contains("test") || lower.contains("spec") {
+        "test"
+    } else if lower.ends_with(".rs") || lower.ends_with(".py") || lower.ends_with(".ts") {
+        "feat"
+    } else {
+        "chore"
+    };
+
+    commit_type.to_string()
+}
+
+fn guess_scope(path: &str) -> Option<String> {
+    let path = Path::new(path);
+    if let Some(parent) = path.parent() {
+        let scope = parent
+            .components()
+            .next()
+            .and_then(|comp| comp.as_os_str().to_str())?
+            .replace(['.', ' '], "-");
+
+        if scope.is_empty() || scope == "a" || scope == "b" {
+            None
+        } else {
+            Some(scope)
+        }
+    } else {
+        None
+    }
+}
+
+fn guess_subject(path: &str, commit_type: &str, language: &Language) -> String {
+    let file_name = Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path);
+    let stem = Path::new(file_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(file_name);
+    let cleaned = stem.replace('-', " ").replace('_', " ").trim().to_string();
+
+    match language {
+        Language::Chinese => match commit_type {
+            "docs" => format!("更新 {} 文档", cleaned),
+            "test" => format!("更新 {} 测试", cleaned),
+            "feat" => format!("更新 {} 逻辑", cleaned),
+            _ => format!("更新 {}", cleaned),
+        },
+        Language::English => match commit_type {
+            "docs" => format!("update {} docs", cleaned),
+            "test" => format!("update {} tests", cleaned),
+            "feat" => format!("update {} logic", cleaned),
+            _ => format!("update {}", cleaned),
+        },
+    }
+}
+
+fn format_commit_line(commit_type: &str, scope: Option<&str>, subject: &str) -> String {
+    let subject = subject.trim();
+    if let Some(scope) = scope {
+        if !scope.is_empty() {
+            return format!("{}({}): {}", commit_type, scope, subject);
+        }
+    }
+    format!("{}: {}", commit_type, subject)
 }
 
 fn get_user_input(prompt: &str) -> Result<String> {
@@ -595,10 +736,6 @@ impl GitConfig {
     }
 }
 
-fn get_mlx_models() -> Result<Vec<String>> {
-    Ok(MLX_MODELS.iter().map(|s| s.to_string()).collect())
-}
-
 fn select_language(git_config: &mut GitConfig) -> Result<Language> {
     let current_lang = get_language(git_config);
     println!("{}", current_lang.available_languages());
@@ -632,74 +769,223 @@ fn get_language(git_config: &GitConfig) -> Language {
         .unwrap_or(Language::English)
 }
 
-fn select_default_model(git_config: &mut GitConfig, language: &Language) -> Result<String> {
-    println!("Fetching available MLX models...");
+fn detect_system_python(language: &Language) -> Result<PathBuf> {
+    let output = Command::new("python3")
+        .arg("-c")
+        .arg("import sys; print(sys.executable)")
+        .output();
 
-    let models = get_mlx_models()?;
-    if models.is_empty() {
-        return Err("No MLX models available".into());
-    }
-
-    println!("{}", language.available_models());
-    for (i, model) in models.iter().enumerate() {
-        // Add description for the default model
-        if model == DEFAULT_MLX_MODEL {
-            println!("{}. {} (Default - Fast & Efficient)", i + 1, model);
-        } else {
-            println!("{}. {}", i + 1, model);
-        }
-    }
-
-    let choice = loop {
-        let input = get_user_input(language.select_model_prompt())?;
-        match input.parse::<usize>() {
-            Ok(num) if num > 0 && num <= models.len() => break num - 1,
-            _ => println!("{}", language.invalid_selection()),
-        }
-    };
-
-    let selected_model = models[choice].clone();
-    git_config.set(CONFIG_MODEL_KEY, &selected_model)?;
-
-    println!(
-        "{}",
-        language
-            .model_set_as_default()
-            .replace("{}", &selected_model)
-    );
-    Ok(selected_model)
-}
-
-fn check_python_mlx() -> Result<bool> {
-    // Check if Python is available
-    match Command::new("python3").arg("--version").output() {
-        Ok(_) => {
-            // Check if mlx-lm is installed
-            match Command::new("python3")
-                .arg("-c")
-                .arg("import mlx_lm; print('MLX-LM available')")
-                .output()
-            {
-                Ok(output) => {
-                    if output.status.success() {
-                        Ok(true)
-                    } else {
-                        let error = String::from_utf8_lossy(&output.stderr);
-                        eprintln!("Warning: MLX-LM not installed. Please install with: pip install mlx-lm");
-                        eprintln!("Error details: {}", error);
-                        Ok(false)
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Warning: Failed to check MLX-LM: {}", e);
-                    Ok(false)
-                }
+    match output {
+        Ok(out) if out.status.success() => {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if path.is_empty() {
+                eprintln!("{}", language.python_missing_warning());
+                Err(language.mlx_not_configured().into())
+            } else {
+                Ok(PathBuf::from(path))
             }
         }
-        Err(_) => {
-            eprintln!("Warning: Python3 not found. Please install Python 3 to use MLX models.");
-            Ok(false)
+        _ => {
+            eprintln!("{}", language.python_missing_warning());
+            Err(language.mlx_not_configured().into())
         }
+    }
+}
+
+fn default_venv_dir() -> PathBuf {
+    if let Ok(path) = env::var("GIT_CA_VENV_PATH") {
+        PathBuf::from(path)
+    } else if let Ok(home) = env::var("HOME") {
+        Path::new(&home).join(".cache/git-ca/venv")
+    } else {
+        PathBuf::from(".git-ca-venv")
+    }
+}
+
+fn resolve_venv_python(venv_dir: &Path) -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    let candidates = ["Scripts/python.exe", "Scripts/python"];
+    #[cfg(not(target_os = "windows"))]
+    let candidates = ["bin/python3", "bin/python"];
+
+    for rel in candidates.iter() {
+        let candidate = venv_dir.join(rel);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn get_mlx_import_error(python: &Path) -> Result<Option<String>> {
+    match Command::new(python).arg("-c").arg("import mlx_lm").output() {
+        Ok(output) => {
+            if output.status.success() {
+                Ok(None)
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let detail = if !stderr.trim().is_empty() {
+                    stderr.trim().to_string()
+                } else if !stdout.trim().is_empty() {
+                    stdout.trim().to_string()
+                } else {
+                    format!("Exit status: {}", output.status)
+                };
+                Ok(Some(detail))
+            }
+        }
+        Err(e) => Err(AppError::Custom(format!(
+            "Failed to execute {python:?}: {e}"
+        ))),
+    }
+}
+
+fn create_or_refresh_venv(system_python: &Path, venv_dir: &Path) -> Result<()> {
+    if let Some(parent) = venv_dir.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut command = Command::new(system_python);
+    command
+        .arg("-m")
+        .arg("venv")
+        .arg("--upgrade-deps")
+        .arg(venv_dir);
+
+    match command.status() {
+        Ok(status) if status.success() => return Ok(()),
+        Ok(_) | Err(_) => {
+            let status = Command::new(system_python)
+                .arg("-m")
+                .arg("venv")
+                .arg(venv_dir)
+                .status()
+                .map_err(|e| {
+                    AppError::Custom(format!("Failed to create venv with {system_python:?}: {e}"))
+                })?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(AppError::Custom(format!(
+                    "Failed to bootstrap virtual environment with {system_python:?}: {status}",
+                )))
+            }
+        }
+    }
+}
+
+fn prepare_python_for_install(python: &Path, language: &Language) -> Result<()> {
+    let pip_status = Command::new(python)
+        .args(["-m", "pip", "--version"])
+        .status();
+
+    if !pip_status.map(|status| status.success()).unwrap_or(false) {
+        println!("{}", language.installing_pip());
+        let status = Command::new(python)
+            .args(["-m", "ensurepip", "--upgrade"])
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .map_err(|e| {
+                AppError::Custom(format!("Failed to bootstrap pip with {python:?}: {e}"))
+            })?;
+
+        if !status.success() {
+            return Err(AppError::Custom(
+                language
+                    .pip_install_failed()
+                    .replace("{}", &status.to_string()),
+            ));
+        }
+    }
+
+    let status = Command::new(python)
+        .args(["-m", "pip", "install", "--upgrade", "pip"])
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .map_err(|e| AppError::Custom(format!("Failed to upgrade pip with {python:?}: {e}")))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(AppError::Custom(
+            language
+                .pip_install_failed()
+                .replace("{}", &status.to_string()),
+        ))
+    }
+}
+
+fn install_mlx(python: &Path, language: &Language) -> Result<()> {
+    let status = Command::new(python)
+        .args(["-m", "pip", "install", "--upgrade", "mlx-lm"])
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .map_err(|e| {
+            AppError::Custom(format!(
+                "Failed to run pip install mlx-lm via {python:?}: {e}"
+            ))
+        })?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(AppError::Custom(
+            language
+                .mlx_install_failed()
+                .replace("{}", &status.to_string()),
+        ))
+    }
+}
+
+fn ensure_python_mlx(language: &Language) -> Result<PathBuf> {
+    let system_python = detect_system_python(language)?;
+    let venv_dir = default_venv_dir();
+
+    if let Some(existing_python) = resolve_venv_python(&venv_dir) {
+        if get_mlx_import_error(&existing_python)?.is_none() {
+            return Ok(existing_python);
+        }
+    }
+
+    match get_mlx_import_error(&system_python)? {
+        None => return Ok(system_python),
+        Some(initial_error) => eprintln!(
+            "{}",
+            language
+                .mlx_dependency_warning()
+                .replace("{}", initial_error.as_str())
+        ),
+    }
+
+    create_or_refresh_venv(&system_python, &venv_dir)?;
+    let venv_python = resolve_venv_python(&venv_dir).ok_or_else(|| {
+        AppError::Custom(format!(
+            "Failed to locate Python interpreter inside {:?}",
+            venv_dir
+        ))
+    })?;
+
+    prepare_python_for_install(&venv_python, language)?;
+    println!("{}", language.installing_mlx());
+    install_mlx(&venv_python, language)?;
+
+    match get_mlx_import_error(&venv_python)? {
+        None => {
+            println!("{}", language.mlx_install_success());
+            Ok(venv_python)
+        }
+        Some(final_error) => Err(AppError::Custom(format!(
+            "{}\n{}",
+            language.mlx_not_configured(),
+            final_error
+        ))),
     }
 }
 
@@ -714,30 +1000,14 @@ fn main() -> Result<()> {
     let mut git_config = GitConfig::new()?;
     let language = get_language(&git_config);
 
-    if args.len() > 1 && args[1] == "model" {
-        select_default_model(&mut git_config, &language)?;
-        return Ok(());
-    }
-
     if args.len() > 1 && args[1] == "language" {
         select_language(&mut git_config)?;
         return Ok(());
     }
 
-    if !check_python_mlx()? {
-        return Err(language.mlx_not_configured().into());
-    }
+    let python_path = ensure_python_mlx(&language)?;
 
-    let model = match git_config.get(CONFIG_MODEL_KEY) {
-        Ok(model) => model,
-        Err(_) => {
-            println!("No default MLX model set. Selecting default model...");
-            // Set default model automatically
-            git_config.set(CONFIG_MODEL_KEY, DEFAULT_MLX_MODEL)?;
-            println!("Using default model: {}", DEFAULT_MLX_MODEL);
-            DEFAULT_MLX_MODEL.to_string()
-        }
-    };
+    let model = DEFAULT_MLX_MODEL.to_string();
 
     let current_dir = env::current_dir()?;
     let repo_path = find_git_repository(&current_dir)
@@ -754,7 +1024,7 @@ fn main() -> Result<()> {
     }
 
     let diff = get_diff()?;
-    let mut commit_msg = analyze_diff(&diff, &model, &language)?;
+    let mut commit_msg = analyze_diff(&diff, &model, &language, &python_path)?;
 
     loop {
         let choice = get_user_input(language.use_edit_cancel_prompt())?;

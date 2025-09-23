@@ -7,7 +7,7 @@ Uses mlx-lm to generate commit messages locally on Apple Silicon
 import sys
 import json
 import argparse
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 try:
     from mlx_lm import load, stream_generate
@@ -26,79 +26,55 @@ AVAILABLE_MODELS = {
 
 DEFAULT_MODEL = "gemma-3-270m-it-6bit"
 
-def build_commit_prompt(diff: str, language: str = "en") -> str:
-    """Build a prompt for generating Git commit messages"""
+def build_commit_prompts(diff: str, language: str = "en") -> Tuple[str, Tuple[str, str, str]]:
+    """Return (system_instruction, (example_user, example_assistant, user_prompt))."""
 
-    if language.lower() == "zh" or language.lower() == "chinese":
-        return f"""分析这个 git diff 并提供一个遵循 Git Flow 格式的提交信息：
-
-<类型>(<范围>): <主题>
-
-<正文>
-
-其中：
-- <类型> 是以下之一：feat, fix, docs, style, refactor, test, chore
-- <范围> 是可选的，表示受影响的模块
-- <主题> 是命令式语气的简短描述
-- <正文> 提供详细描述（可选）
-
-重要指导原则：
-1. 只选择一个最能代表变更主要目的的类型。
-2. 将所有变更总结为一个简洁的主题行。
-3. 不要在提交信息中包含正文或脚注。
-4. 不要提及或引用任何问题编号。
-5. 如果有多个不相关的变更，只关注最重要的变更。
-6. **确保只生成一个提交信息。**
-7. **提交信息的内容必须使用简体中文，包括主题和正文。**
-8. **不允许使用英文，除了 Git Flow 格式的类型关键字（feat、fix、docs 等）。**
-
-以下是要分析的 diff：
-
-{diff}
-
-你的任务：
-1. 分析给定的 git diff。
-2. **生成一个**严格遵循上述 Git Flow 格式的提交信息。
-3. 确保你的回复**只**包含格式化的提交信息，不要有任何额外的解释或 markdown。
-4. 提交信息**必须**以 <类型> 开头并遵循所示的确切结构。
-5. **提交信息的内容（主题和正文）必须使用简体中文。**
-
-记住：你的回复应该只包含中文的提交信息，不要有其他内容。"""
-
+    if language.lower() in {"zh", "chinese", "中文"}:
+        system_prompt = (
+            "你是一名资深化身的 Git 提交信息写手。"
+            "请严格按照 Git Flow 格式输出：<类型>(<作用域>): <主题>。"
+            "类型必须从 feat/fix/docs/style/refactor/test/chore 中选择，作用域可省略。"
+            "主题保持命令式语气，使用简体中文描述内容，不要添加正文、脚注或额外解释。"
+        )
+        example_user = (
+            "```diff\n"
+            "diff --git a/src/main.rs b/src/main.rs\n"
+            "@@ -1,2 +1,2 @@\n"
+            "-println!(\"Hello\");\n"
+            "+println!(\"Hello, world!\");\n"
+            "```\n"
+            "请生成提交信息。"
+        )
+        example_assistant = "feat(main): 改进问候语输出"
+        user_prompt = (
+            "以下是需要总结的 git diff，输出一条提交信息即可：\n"
+            f"```diff\n{diff}\n```"
+        )
     else:
-        return f"""Analyze this git diff and provide a **single** commit message following the Git Flow format:
+        system_prompt = (
+            "You are an expert release engineer who writes Git Flow commit messages."
+            "Respond with exactly one line in the format <type>(<scope>): <subject>"
+            " (scope optional). Use imperative voice, keep it under 72 characters,"
+            " and do not include bodies, footers, or issue references."
+        )
+        example_user = (
+            "```diff\n"
+            "diff --git a/src/lib.rs b/src/lib.rs\n"
+            "@@ -10,0 +11,3 @@\n"
+            "+/// Greets the world\n"
+            "+pub fn hello() {\n"
+            "+    println!(\"hi\");\n"
+            "+}\n"
+            "```\n"
+            "Generate the commit message."
+        )
+        example_assistant = "docs(lib): document hello helper"
+        user_prompt = (
+            "Here is the diff that needs a commit message:\n"
+            f"```diff\n{diff}\n```"
+        )
 
-<type>(<scope>): <subject>
-
-<body>
-
-Where:
-- <type> is one of: feat, fix, docs, style, refactor, test, chore
-- <scope> is optional and represents the module affected
-- <subject> is a short description in the imperative mood
-- <body> provides detailed description (optional)
-
-Important guidelines:
-1. Choose only ONE type that best represents the primary purpose of the changes.
-2. Summarize ALL changes into a single, concise subject line.
-3. Do not include a body or footer in the commit message.
-4. Do not mention or reference any issue numbers.
-5. Focus solely on the most significant change if there are multiple unrelated changes.
-6. **Ensure that only one commit message is generated.**
-7. **The commit message content must be written in English language.**
-8. **Do not use any other languages except English for the content.**
-
-Here's the diff to analyze:
-
-{diff}
-
-Your task:
-1. Analyze the given git diff.
-2. **Generate only one** commit message strictly following the Git Flow format described above.
-3. Ensure your response contains **ONLY** the formatted commit message, without any additional explanations or markdown.
-4. **The commit message content (subject and body) must be written in English.**
-
-Remember: Your response should only include the English commit message, nothing else."""
+    return system_prompt, (example_user, example_assistant, user_prompt)
 
 def generate_commit_message(diff: str, model_name: str = DEFAULT_MODEL, language: str = "en",
                           max_tokens: int = 512, temperature: float = 0.7) -> str:
@@ -116,25 +92,44 @@ def generate_commit_message(diff: str, model_name: str = DEFAULT_MODEL, language
         print(f"Loading model: {model_path}", file=sys.stderr)
         model, tokenizer = load(model_path)
 
-        # Build prompt
-        prompt = build_commit_prompt(diff, language)
+        # Build conversation prompts
+        system_prompt, (example_user, example_assistant, user_prompt) = build_commit_prompts(
+            diff, language
+        )
+
+        if hasattr(tokenizer, "apply_chat_template"):
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": example_user},
+                {"role": "assistant", "content": example_assistant},
+                {"role": "user", "content": user_prompt},
+            ]
+            prompt = tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+            )
+        else:
+            prompt = (
+                f"{system_prompt}\n\n"
+                f"Example input:\n{example_user}\n\n"
+                f"Example output:\n{example_assistant}\n\n"
+                f"Current diff:\n{user_prompt}\n\nCommit message:"
+            )
 
         # Generate response with streaming
         print("Generating commit message...", file=sys.stderr)
         response = ""
 
-        for chunk in stream_generate(
+        generator = stream_generate(
             model,
             tokenizer,
             prompt=prompt,
             max_tokens=max_tokens,
-            temperature=temperature,
-            verbose=False
-        ):
-            response += chunk.text
-            print(chunk.text, end="", flush=True)
+        )
 
-        print()  # New line after generation
+        for chunk in generator:
+            response += chunk.text
+
         return response.strip()
 
     except Exception as e:

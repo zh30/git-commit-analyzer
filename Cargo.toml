@@ -1,11 +1,19 @@
 [package]
 name = "git-ca"
-version = "1.0.4"
+version = "1.0.5"
 description = "AI-powered Git plugin for generating meaningful commit messages"
 authors = ["Henry Zhang <hello@zhanghe.dev>"]
 license = "MIT"
 repository = "https://github.com/zh30/git-commit-analyzer"
 edition = "2021"
 
+[features]
+default = []
+mlx = ["cxx"]
+
 [dependencies]
 git2 = "0.18"
+cxx = { version = "1.0", optional = true }
+
+[build-dependencies]
+cxx-build = "1.0"
