@@ -5,6 +5,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 mod mlx;
 
@@ -15,6 +16,9 @@ const CONFIG_LANGUAGE_KEY: &str = "commit-analyzer.language";
 const COMMIT_TYPES: &[&str] = &["feat", "fix", "docs", "style", "refactor", "test", "chore"];
 
 const DEFAULT_MLX_MODEL: &str = "gemma-3-270m-it-6bit";
+const PYTHON_SCRIPT: &str = include_str!("../generate_commit.py");
+
+static PYTHON_SCRIPT_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq)]
 enum Language {
@@ -423,13 +427,14 @@ feat(用户认证): 实现密码重置功能
 }
 
 fn analyze_diff(diff: &str, model: &str, language: &Language, python: &Path) -> Result<String> {
+    let script_path = python_script_path()?;
     println!("{}", language.generating_commit_message());
     eprintln!("\x1b[90m{}\x1b[0m", language.this_may_take_moment());
 
     // Build the Python command
     let mut command = Command::new(python);
     command
-        .arg("generate_commit.py")
+        .arg(&script_path)
         .arg("--diff")
         .arg(diff)
         .arg("--model")
@@ -542,6 +547,25 @@ fn analyze_diff(diff: &str, model: &str, language: &Language, python: &Path) -> 
     };
     println!("{}", language.commit_message_generated());
     Ok(process_mlx_response(&response, diff, language))
+}
+
+fn python_script_path() -> Result<PathBuf> {
+    if let Some(existing) = PYTHON_SCRIPT_PATH.get() {
+        return Ok(existing.clone());
+    }
+
+    let mut path = env::temp_dir();
+    path.push(format!(
+        "git-ca-generate-commit-{}-{}.py",
+        env!("CARGO_PKG_VERSION"),
+        std::process::id()
+    ));
+
+    fs::write(&path, PYTHON_SCRIPT)
+        .map_err(|e| AppError::Custom(format!("Failed to materialize python helper: {}", e)))?;
+
+    let _ = PYTHON_SCRIPT_PATH.set(path.clone());
+    Ok(path)
 }
 
 fn process_mlx_response(response: &str, diff: &str, language: &Language) -> String {
