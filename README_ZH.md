@@ -1,5 +1,7 @@
 # Git 提交分析器
 
+[![Peerlist](https://github-readme-badge.peerlist.io/api/zhanghe)](https://peerlist.io/zhanghe)
+
 [English](README.md)
 
 Git 提交分析器是一个强大的 Git 插件，它利用人工智能根据您的暂存更改自动生成有意义的提交消息。它使用 Ollama 分析 git 差异并提出符合 Git Flow 格式的提交消息。

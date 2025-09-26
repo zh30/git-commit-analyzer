@@ -1,5 +1,7 @@
 # Git Commit Analyzer
 
+[![Peerlist](https://github-readme-badge.peerlist.io/api/zhanghe)](https://peerlist.io/zhanghe)
+
 [中文](README_ZH.md) | [Français](README_FR.md) | [Español](README_ES.md)
 
 Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically generate meaningful commit messages based on your staged changes. It uses Ollama to analyze git diffs and propose commit messages following the Git Flow format.
