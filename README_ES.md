@@ -1,5 +1,7 @@
 # Analizador de Commits Git
 
+[![Peerlist](https://github-readme-badge.peerlist.io/api/zhanghe)](https://peerlist.io/zhanghe)
+
 [English](README.md) | [中文](README_ZH.md) | [Français](README_FR.md)
 
 Analizador de Commits Git es un potente plugin de Git que utiliza IA para generar automáticamente mensajes de commit significativos basados en tus cambios preparados. Utiliza Ollama para analizar diferencias git y proponer mensajes de commit siguiendo el formato Git Flow.
