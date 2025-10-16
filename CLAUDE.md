@@ -1,140 +1,54 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) when working inside this repository.
 
 ## Project Overview
-Git Commit Analyzer is a Rust-based Git plugin that uses Ollama AI to generate meaningful commit messages from staged changes. It follows Git Flow format conventions, supports multiple languages, and provides both a CLI tool and a VS Code extension for enhanced developer experience.
+- **Purpose**: CLI helper that generates Git Flow–style commit messages from staged changes.
+- **Runtime**: Pure Rust binary (`bin = "git-ca"`). No web services or VS Code extension.
+- **AI Backend**: Local llama.cpp inference via the `llama_cpp_sys_2` crate. Models are GGUF files referenced through Git config (`commit-analyzer.model`).
+- **Prompt Workflow**: Staged diff is summarised, validated, and fed to the model; invalid output triggers retries or a deterministic fallback.
 
-## Core Architecture
-- **Primary Language**: Rust (edition 2021) for CLI tool
-- **Extension Language**: TypeScript for VS Code integration
-- **Entry Point**: `src/main.rs:645` - main function handles CLI arguments and orchestrates the workflow
-- **Key Dependencies**: 
-  - `git2` for Git operations
-  - `reqwest` for Ollama API communication (with blocking and json features)
-  - `serde_json` for JSON handling
-- **Project Structure**: Single binary crate with separate VS Code extension in `vscode-extension/`
-- **One-Click Installation**: Automated installation script at `install-git-ca.sh` for cross-platform deployment
+## Key Dependencies
+- `git2` — Git plumbing (staged diff, repository metadata).
+- `hf-hub` — Optional Hugging Face download helper for the default model.
+- `llama_cpp_sys_2` — FFI bindings to llama.cpp.
+- `clap` (built-in via `env::args`) not used; argument parsing is manual.
+
+## Source Layout
+- `src/main.rs` — CLI entrypoint, Git integration, diff summariser, fallback commit generator.
+  - `build_diff_summary` / `build_diff_variants` — assemble prompt-friendly summaries and raw tails.
+  - `generate_fallback_commit_message` — deterministic commit synthesis when the model fails.
+  - `analyze_diff` — orchestrates prompting, retries, and validation.
+  - `is_valid_commit_message` & `parse_commit_subject` — enforce Git Flow format.
+- `src/llama.rs` — wrapper around llama.cpp session lifecycle (`LlamaSession::new` / `infer`).
+- No additional crates, workspaces, or extensions.
+
+## Configuration Keys
+- `commit-analyzer.model` — path to the GGUF model.
+- `commit-analyzer.language` — prompt language (`en`, `zh`).
+- `commit-analyzer.context` — llama context length (512–8192). The diff summariser honours this limit.
 
 ## Development Commands
-
-### Rust CLI Tool
 ```bash
-cargo build --release          # Build release binary
-cargo run                      # Run in debug mode
-cargo run -- model             # Change default Ollama model
-cargo run -- language          # Change default output language
-cargo check                    # Quick check for compilation errors
-cargo clippy                   # Lint code
-cargo fmt                      # Format code
-cargo test                     # Run tests (no test framework currently configured)
+cargo fmt
+cargo clippy -- -D warnings
+cargo test
+cargo run -- git ca           # run against staged changes
 ```
 
-### VS Code Extension
-```bash
-cd vscode-extension
-npm run compile                 # Compile TypeScript
-npm run watch                   # Watch mode for development
-npm run package                 # Package as .vsix file
-npm run publish                 # Publish to marketplace
-npm run vscode:prepublish       # Prepare for publishing
-```
+## Testing Notes
+- Unit tests live inline (`#[cfg(test)]`) and focus on parsing, fallback selection, and diff truncation (`tests::...` in `src/main.rs`).
+- There are currently no integration tests under `tests/`.
 
-### Manual Installation for Testing
-```bash
-# CLI tool
-cargo build --release
-cp target/release/git-ca ~/.git-plugins/
-# Add ~/.git-plugins to PATH
+## Common Tasks
+- **Add a feature**: edit `src/main.rs`, add unit tests next to the affected functions, run the command suite above, and update README(s) plus `AGENTS.md`.
+- **Adjust model handling**: update `src/llama.rs` or the `generate_fallback_commit_message` pipeline, and document new Git config keys in the READMEs.
+- **Modify prompts**: touch `build_diff_summary`, `build_commit_prompt`, or language strings in `Language` enum; update multilingual READMEs accordingly.
 
-# VS Code extension
-cd vscode-extension && npm run package
-# Install .vsix file in VS Code
-```
+## Distribution
+- Release binaries are produced with `cargo build --release`.
+- Homebrew formula (`git-ca.rb`) and installer script (`install-git-ca.sh`) rely on that binary; keep `README.md` / `DEPLOY.md` / `INSTALL.md` in sync.
 
-## Key Components
-
-### Core Functions (`src/main.rs`)
-- `main()`: CLI entry point at line 645 - handles argument parsing, model/language selection, and commit workflow
-- `find_git_repository()`: Locates repo from current directory at line 297
-- `get_diff()`: Gets staged changes via `git diff --cached` at line 309
-- `build_commit_prompt()`: Language-specific prompt generation at line 316
-- `analyze_diff()`: AI message generation at line 404 (now supports language parameter)
-- `process_ollama_response()`: Post-processes AI output at line 471
-- `select_language()`: Interactive language selection at line 576
-- `get_language()`: Gets configured language with English default at line 596
-- `select_default_model()`: Interactive model selection at line 604
-- **Key Constants**: `OLLAMA_API_BASE`, `COMMIT_TYPES`, `CONFIG_MODEL_KEY`, `CONFIG_LANGUAGE_KEY`
-
-### VS Code Extension (`vscode-extension/src/extension.ts`)
-- Command registration: `gitCommitAnalyzer.generateMessage`
-- Binary discovery with fallback paths
-- SCM integration with buttons and context menus
-- Progress indication during AI generation
-- **Extension Activation**: `onStartupFinished` and command-based activation
-- **UI Integration**: SCM/title and scm/resourceGroup/context menus
-- **Dependencies**: VS Code API >= 1.74.0, TypeScript 4.9.5
-
-### Configuration Management
-- Git config integration via `git2::Config`
-- Model selection stored in `commit-analyzer.model` key
-- Language selection stored in `commit-analyzer.language` key (English default)
-- User info auto-configured from Git settings
-- Support for English and Simplified Chinese output languages
-- **Git Config Keys**: `commit-analyzer.model`, `commit-analyzer.language`, `user.name`, `user.email`
-
-### Ollama Integration
-- API base URL: `http://localhost:11434/api`
-- Model listing via `/tags` endpoint
-- Streaming response handling for real-time generation
-- Connection validation before processing
-- Enforces Git Flow commit message format: `<type>(<scope>): <subject>` with optional body
-- Supported commit types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
-- Generates single commit message per invocation without issue numbers or footers
-
-## Distribution Methods
-- **One-Click Installation**: `bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)" - automated cross-platform installer
-- **Homebrew**: `brew tap zh30/tap && brew install git-ca`
-- **Manual**: Build and install to `~/.git-plugins/`
-- **VS Code Extension**: Package as `.vsix` and install
-- **Multi-language docs**: README files in EN, ZH, FR, ES
-- **CDN Distribution**: Installation script hosted at `https://sh.zhanghe.dev/install-git-ca.sh`
-
-## Usage Patterns
-- Primary command: `git ca` (after installation)
-- Model management: `git ca model`
-- Language selection: `git ca language` (English/Chinese)
-- Version check: `git ca --version`
-- VS Code: Use wand icon in SCM panel or context menu
-
-## Testing Workflow
-1. Stage changes with `git add`
-2. Run `./target/release/git-ca` or `cargo run`
-3. Interactive prompt allows using, editing, or canceling
-4. VS Code: Click generate button and approve in input box
-
-## Installation Script Details
-The `install-git-ca.sh` script provides automated cross-platform installation:
-- **OS Detection**: Automatically identifies macOS, Debian/Ubuntu, Fedora/CentOS, Arch, openSUSE
-- **Dependency Management**: Installs Git, Rust, and configures Ollama
-- **Environment Setup**: Configures PATH and shell integration
-- **Interactive Configuration**: Guides users through Git and Ollama setup
-- **Error Recovery**: Provides fallbacks and troubleshooting guidance
-- **CDN Hosted**: Available at `https://sh.zhanghe.dev/install-git-ca.sh` for one-click installation
-
-## Error Handling
-- Ollama connection validation before processing
-- Git repository detection
-- Staged changes validation
-- Model selection fallback
-- Language selection with English default
-- Custom error types with unified handling (AppError enum)
-- Binary path discovery for VS Code extension
-- **Error Types**: `AppError` enum with `GitError`, `NetworkError`, `ConfigError`, `Custom` variants
-- **Installation Script Robustness**: Cross-platform OS detection, dependency auto-installation, interactive fallbacks
-
-# important-instruction-reminders
-Do what has been asked; nothing more, nothing less.
-NEVER create files unless they're absolutely necessary for achieving your goal.
-ALWAYS prefer editing an existing file to creating a new one.
-NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
+## Reminders
+- Respect existing instructions in `AGENTS.md`.
+- Run `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test` before submitting patches.

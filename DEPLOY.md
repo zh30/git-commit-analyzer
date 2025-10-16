@@ -1,182 +1,60 @@
-# Git Commit Analyzer 安装脚本部署指南
+# Deploy & Release Guide
 
-## 部署步骤
+This document outlines the steps for shipping a new version of Git Commit Analyzer and keeping distribution channels in sync.
 
-### 1. 上传安装脚本
+## 1. Pre-release Checklist
+- [ ] Update `Cargo.toml` / `Cargo.lock` version.
+- [ ] Run `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`.
+- [ ] Smoke test `cargo run -- git ca` against a fixture repository (document output in the PR).
+- [ ] Review `README*.md`, `INSTALL.md`, `AGENTS.md`, and `CLAUDE.md` for accuracy (context tuning, fallback behaviour, config keys).
+- [ ] Update `CHANGELOG.md` (if maintained) or include release notes in the PR/Release description.
 
-将 `install-git-ca.sh` 文件上传到你的 CDN 服务器或静态文件托管服务。
-
-#### 支持的托管服务：
-- **GitHub Raw**: `https://raw.githubusercontent.com/zh30/git-commit-analyzer/main/install-git-ca.sh`
-- **GitHub Pages**: `https://zh30.github.io/git-commit-analyzer/install-git-ca.sh`
-- **CDN 服务**: Cloudflare, AWS CloudFront, 阿里云 CDN 等
-- **对象存储**: AWS S3, 腾讯云 COS, 阿里云 OSS 等
-
-### 2. 更新 README 文件中的 URL
-
-将所有 README 文件中的 `https://cdn.example.com/install-git-ca.sh` 替换为你的实际 URL：
-
+## 2. Build Artifacts
 ```bash
-# 在项目根目录执行
-find . -name "README*.md" -exec sed -i '' 's|https://cdn.example.com/install-git-ca.sh|https://sh.zhanghe.dev/install-git-ca.sh|g' {} \;
+cargo build --release
+tar -C target/release -czf git-ca-$VERSION-x86_64.tar.gz git-ca
+shasum -a 256 git-ca-$VERSION-x86_64.tar.gz
 ```
+Capture the SHA256 hash for Homebrew and installer updates.
 
-### 3. 测试安装脚本
+## 3. GitHub Release
+1. Tag the commit (`git tag -a v$VERSION -m "git-ca v$VERSION"`).
+2. Push tags (`git push origin v$VERSION`).
+3. Create a GitHub release:
+   - Title `git-ca v$VERSION`.
+   - Upload the tarball.
+   - Paste release notes (highlights, breaking changes, upgrade instructions).
 
-在测试环境中验证安装脚本是否正常工作：
+## 4. Installer Script
+`install-git-ca.sh` bootstraps dependencies, builds the binary, and configures PATH.
+- Update version references and checksums if the script pins artefacts.
+- Verify the script installs the latest release on macOS and Linux.
+- Host the script at `https://sh.zhanghe.dev/install-git-ca.sh` (or your CDN) and update README links if the URL changes.
+- Optional: publish copy under a versioned path (e.g. `install-git-ca-v$VERSION.sh`) for deterministic installs.
 
-```bash
-# 测试安装脚本
-bash -c "$(curl -fsSL https://your-actual-url.com/install-git-ca.sh)"
-```
+## 5. Homebrew Formula (`git-ca.rb`)
+1. Update `url` to the new GitHub release tarball.
+2. Replace `sha256` with the fresh checksum.
+3. Bump the `version`.
+4. `brew install --build-from-source ./git-ca.rb` to validate.
+5. `brew test git-ca` and `brew audit --strict git-ca`.
+6. Publish through your tap (`brew tap zh30/tap`) or submit to Homebrew if appropriate.
 
-## 推荐的部署方式
+## 6. Model Distribution Notes
+The CLI defaults to downloading `unsloth/gemma-3-270m-it-GGUF` if no local model is configured.
+- Confirm the Hugging Face repository is accessible and that rate limits are acceptable.
+- Document any repository or checksum changes in `README.md` and `INSTALL.md`.
+- If shipping a custom model, mirror it to a stable location and adjust `DEFAULT_MODEL_REPO` in code.
 
-### 方式一：GitHub Raw（免费）
+## 7. Post-release Verification
+- Re-run the installer script on macOS and Linux (fresh machines or containers) to ensure all dependencies resolve.
+- Install via Homebrew and execute `git ca --version`.
+- Confirm fallbacks still operate:
+  - Stage a dependency-only diff and run `git ca` (expect `chore(deps): ...`).
+  - Stage a runtime change and ensure the model/fallback yields a `fix(...)` message.
+- Monitor issues for feedback on model downloads, context limits, or installation regressions.
 
-```bash
-# 直接使用 GitHub Raw URL
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/zh30/git-commit-analyzer/main/install-git-ca.sh)"
-```
-
-**优点**：
-- 免费
-- 自动与仓库同步
-- 无需额外配置
-
-**缺点**：
-- 在某些地区可能访问较慢
-- 有速率限制
-
-### 方式二：GitHub Pages（免费）
-
-1. 创建 `gh-pages` 分支或使用 `docs/` 目录
-2. 将 `install-git-ca.sh` 放入相应位置
-3. 启用 GitHub Pages
-
-```bash
-# 访问 URL
-https://username.github.io/git-commit-analyzer/install-git-ca.sh
-```
-
-### 方式三：CDN 加速（推荐）
-
-使用 CDN 服务加速 GitHub Raw 内容：
-
-```bash
-# 使用 jsDelivr CDN
-https://cdn.jsdelivr.net/gh/zh30/git-commit-analyzer@latest/install-git-ca.sh
-
-# 使用 UNPKG
-https://unpkg.com/browse/git-commit-analyzer@latest/install-git-ca.sh
-```
-
-## 安全考虑
-
-### 1. 脚本签名（可选）
-
-为了增加安全性，可以考虑对脚本进行签名：
-
-```bash
-# 生成签名
-gpg --detach-sign --armor install-git-ca.sh
-
-# 用户验证
-curl -fsSL https://your-url.com/install-git-ca.sh | gpg --verify
-```
-
-### 2. 版本控制
-
-建议在 URL 中包含版本信息：
-
-```bash
-# 包含版本号
-https://sh.zhanghe.dev/install-git-ca-v1.0.3.sh
-
-# 使用 latest 标签
-https://sh.zhanghe.dev/install-git-ca-latest.sh
-```
-
-### 3. 访问统计
-
-如果需要统计安装次数，可以使用重定向服务：
-
-```bash
-# 使用短链接服务
-https://git-ca.install/install
-https://bit.ly/git-ca-install
-```
-
-## 监控和维护
-
-### 1. 访问日志监控
-
-监控安装脚本的下载次数：
-
-```bash
-# nginx 访问日志
-tail -f /var/log/nginx/access.log | grep install-git-ca.sh
-
-# AWS CloudFront 监控
-aws cloudwatch get-metric-statistics --namespace AWS/CloudFront --metric-name Requests --dimensions Name=DistributionId,Value=YOUR_DISTRIBUTION_ID --start-time 2024-01-01T00:00:00Z --end-time 2024-01-02T00:00:00Z --period 86400 --statistics Sum
-```
-
-### 2. 定期更新
-
-定期检查和更新安装脚本：
-
-- 依赖包版本更新
-- 新的操作系统支持
-- 安全漏洞修复
-- 功能改进
-
-### 3. 回滚策略
-
-准备回滚方案：
-
-```bash
-# 保留多个版本的安装脚本
-install-git-ca-v1.0.0.sh
-install-git-ca-v1.0.1.sh
-install-git-ca-latest.sh
-
-# 使用符号链接切换版本
-ln -sf install-git-ca-v1.0.1.sh install-git-ca-latest.sh
-```
-
-## 故障排除
-
-### 常见问题
-
-1. **CORS 错误**
-   - 确保 CDN 服务器配置了正确的 CORS 头
-   - 检查 `Access-Control-Allow-Origin` 设置
-
-2. **SSL 证书问题**
-   - 确保使用 HTTPS
-   - 检查证书是否有效
-
-3. **脚本执行权限**
-   - 确保脚本有执行权限
-   - 检查文件权限设置
-
-4. **网络连接问题**
-   - 提供备用下载链接
-   - 考虑使用多个 CDN 源
-
-### 调试方法
-
-```bash
-# 测试脚本下载
-curl -I https://your-url.com/install-git-ca.sh
-
-# 检查脚本内容
-curl -fsSL https://your-url.com/install-git-ca.sh | head -10
-
-# 验证脚本语法
-bash -n <(curl -fsSL https://your-url.com/install-git-ca.sh)
-```
-
-## 总结
-
-一键安装脚本大大提升了用户体验，将复杂的多步骤安装过程简化为单行命令。选择合适的部署方式并做好监控维护，能够确保用户获得最佳的安装体验。
+## 8. Communication
+- Announce the release (GitHub, project page, changelog).
+- Note any environment changes (e.g., new minimum Rust version, different default context).
+- Provide upgrade instructions if manual steps are required (e.g., re-selecting the model).

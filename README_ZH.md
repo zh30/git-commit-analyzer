@@ -1,165 +1,95 @@
 # Git 提交分析器
 
-[![Peerlist](https://github-readme-badge.peerlist.io/api/zhanghe)](https://peerlist.io/zhanghe)
+[English](README.md) · [Français](README_FR.md) · [Español](README_ES.md)
 
-[English](README.md)
+Git 提交分析器是一个基于 Rust 的 Git 插件，利用本地 llama.cpp 模型分析已暂存的 diff，并生成符合 Git Flow 规范的提交说明。CLI 会在提示前压缩冗长 diff，校验模型输出格式，并在必要时提供确定性的兜底提交信息。
 
-Git 提交分析器是一个强大的 Git 插件，它利用人工智能根据您的暂存更改自动生成有意义的提交消息。它使用 Ollama 分析 git 差异并提出符合 Git Flow 格式的提交消息。
+## 功能特性
 
-## 功能特点
+- **本地推理**：通过 `llama_cpp_sys` 调用 GGUF 模型，无需远程 API。
+- **智能 diff 摘要**：锁文件、生成物等大文件仅展示概要，避免浪费 Token。
+- **Git Flow 校验**：严格要求 `<type>(<scope>): <subject>`，失败时自动重试或兜底。
+- **交互式 CLI**：支持直接使用、编辑或取消生成的提交说明。
+- **多语言提示**：提供英文（默认）和简体中文两种提示语言。
+- **上下文可调**：可通过 Git 配置调整 llama 上下文长度。
 
-- 自动生成符合 Git Flow 规范的提交消息
-- 由 Ollama 提供支持，实现本地 AI 处理
-- 交互模式允许用户使用、编辑或取消建议的提交消息
-- 多语言支持（英文和简体中文）
-- 跨平台兼容性（Linux、macOS、Windows）
-- 可以使用您的个人 Git 签名进行自定义
-- 支持模型选择和持久化
+## 环境要求
 
-## 前提条件
+- Git ≥ 2.30
+- Rust 稳定版工具链
+- 构建 llama.cpp 所需依赖（cmake、C/C++ 编译器、Metal/CUDA 等）
+- 本地 GGUF 模型（首次运行可自动下载 `unsloth/gemma-3-270m-it-GGUF`）
 
-- Git（2.0 或更高版本）
-- 已安装并运行 Ollama（https://ollama.com/download）
-- Ollama 中至少安装了一个语言模型
+## 安装方式
 
-## 安装
+### 手动安装
 
-### 🚀 一键安装（推荐）
+```bash
+git clone https://github.com/zh30/git-commit-analyzer.git
+cd git-commit-analyzer
+cargo build --release
+mkdir -p ~/.git-plugins
+cp target/release/git-ca ~/.git-plugins/
+echo 'export PATH="$HOME/.git-plugins:$PATH"' >> ~/.bashrc   # 根据使用的 shell 调整
+source ~/.bashrc
+```
 
-最快的安装方式，只需一行命令即可完成所有安装步骤：
+CLI 会在常用目录（`./models`、`~/Library/Application Support/git-ca/models`、`~/.cache/git-ca/models`）中查找 GGUF 模型，若未找到会提示自动下载默认模型。
+
+### Homebrew（macOS / Linux）
+
+```bash
+brew tap zh30/tap
+brew install git-ca
+```
+
+### 一键脚本
+
+可选的 `install-git-ca.sh` 会检测依赖、编译二进制并更新 PATH：
 
 ```bash
 bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
 ```
 
-这将自动完成：
-- 检测您的操作系统
-- 安装所有依赖（Git、Rust、Ollama）
-- 构建并安装插件
-- 配置环境变量
-- 设置 Git 配置
+运行前建议审阅脚本，并确认本地可访问目标 GGUF 模型。
 
-### Homebrew（macOS 和 Linux）
+## 使用说明
 
-或者，您也可以通过 Homebrew 安装：
-
-```
-brew tap zh30/tap
-brew install git-ca
+```bash
+git add <files>
+git ca
 ```
 
-安装后，您可以立即使用 `git ca` 命令。
+首次运行需选择模型路径。后续流程包括：
 
-### 手动安装（Linux 和 macOS）
-
-1. 克隆仓库：
-   ```
-   git clone https://github.com/zh30/git-commit-analyzer.git
-   cd git-commit-analyzer
-   ```
-
-2. 构建项目：
-   ```
-   cargo build --release
-   ```
-
-3. 创建 Git 插件目录（如果不存在）：
-   ```
-   mkdir -p ~/.git-plugins
-   ```
-
-4. 将编译好的二进制文件复制到插件目录：
-   ```
-   cp target/release/git-ca ~/.git-plugins/
-   ```
-
-5. 将插件目录添加到您的 PATH。根据您使用的 shell，将以下行添加到 `~/.bashrc`、`~/.bash_profile` 或 `~/.zshrc`：
-   ```
-   export PATH="$HOME/.git-plugins:$PATH"
-   ```
-
-6. 重新加载您的 shell 配置：
-   ```
-   source ~/.bashrc  # 或 ~/.bash_profile, 或 ~/.zshrc
-   ```
-
-### Windows - 理论上可行
-
-1. 克隆仓库：
-   ```
-   git clone https://github.com/zh30/git-commit-analyzer.git
-   cd git-commit-analyzer
-   ```
-
-2. 构建项目：
-   ```
-   cargo build --release
-   ```
-
-3. 创建 Git 插件目录（如果不存在）：
-   ```
-   mkdir %USERPROFILE%\.git-plugins
-   ```
-
-4. 将编译好的二进制文件复制到插件目录：
-   ```
-   copy target\release\git-commit-analyzer.exe %USERPROFILE%\.git-plugins\
-   ```
-
-5. 将插件目录添加到您的 PATH：
-   - 右键点击"此电脑"或"我的电脑"并选择"属性"
-   - 点击"高级系统设置"
-   - 点击"环境变量"
-   - 在"系统变量"下，找到并选择"Path"，然后点击"编辑"
-   - 点击"新建"并添加 `%USERPROFILE%\.git-plugins`
-   - 点击"确定"关闭所有对话框
-
-6. 重启所有打开的命令提示符，使更改生效。
-
-## 使用方法
-
-安装后，您可以在任何 Git 仓库中使用 Git 提交分析器：
-
-1. 在您的 Git 仓库中暂存您的更改（使用 `git add` 命令）。
-2. 运行以下命令：
-
-   ```
-   git ca
-   ```
-
-3. 如果是首次运行该命令，系统会提示您从已安装的 Ollama 模型中选择一个模型。
-4. 程序将分析您的暂存更改并生成建议的提交消息。
-5. 您可以选择使用建议的消息、编辑它或取消提交。
+1. 对已暂存 diff 进行摘要（大型文件仅展示概要）。
+2. llama.cpp 模型生成提交说明。
+3. 若输出不符合规范，使用更严格提示重试；仍失败则给出兜底信息（如 `chore(deps): update dependencies`）。
+4. 交互式选择 **使用**、**编辑** 或 **取消**。
 
 ### 配置命令
 
-要随时更改默认模型，请运行：
+- `git ca model` — 交互式设置模型路径，写入 `commit-analyzer.model`。
+- `git ca language` — 切换提示语言（英文/中文），写入 `commit-analyzer.language`。
+- `git config --global commit-analyzer.context 1024` — 设置 llama 上下文长度（512–8192），diff 摘要会自动遵守该限制。
 
+## 开发指引
+
+```bash
+cargo fmt
+cargo clippy -- -D warnings
+cargo test
+cargo run -- git ca
 ```
-git ca model
-```
 
-要设置 AI 生成提交消息的输出语言，请运行：
-
-```
-git ca language
-```
-
-可用语言：
-- 英文（默认）
-- 简体中文
-
-所选语言将决定 AI 模型生成的提交消息的语言。注意：这会影响 AI 的提示语言，而不是界面语言。
+核心代码：
+- `src/main.rs` — CLI 主流程、diff 摘要、兜底提交逻辑。
+- `src/llama.rs` — llama.cpp 会话封装。
 
 ## 贡献
 
-欢迎贡献！请随时提交拉取请求。
+欢迎提交 Pull Request！请在提交前完成 `cargo fmt` / `cargo clippy -- -D warnings` / `cargo test`，并在行为变化时更新相关文档（`README*.md`、`AGENTS.md`、`DEPLOY.md`）。
 
 ## 许可证
 
-该项目采用 MIT 许可证 - 详情请参阅 [LICENSE](LICENSE) 文件。
-
-## 致谢
-
-- Rust 社区提供了优秀的库和工具
-- Ollama 提供本地 AI 模型支持
+项目采用 MIT 许可证，详见 [LICENSE](LICENSE)。
