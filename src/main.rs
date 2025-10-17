@@ -7,12 +7,10 @@ use std::collections::HashSet;
 use std::env;
 use std::fmt;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-const CONFIG_MODEL_KEY: &str = "commit-analyzer.model";
 const CONFIG_LANGUAGE_KEY: &str = "commit-analyzer.language";
-const CONFIG_CONTEXT_KEY: &str = "commit-analyzer.context";
 const COMMIT_TYPES: &[&str] = &["feat", "fix", "docs", "style", "refactor", "test", "chore"];
 const DEFAULT_MODEL_REPO: &str = "unsloth/gemma-3-270m-it-GGUF";
 const DEFAULT_CONTEXT_SIZE: i32 = 1024;
@@ -125,15 +123,15 @@ impl Language {
 
     fn model_set_as_default(&self) -> &'static str {
         match self {
-            Language::English => "Saved default model path: {}",
-            Language::Chinese => "默认模型路径已保存：{}",
+            Language::English => "Model path ready: {}",
+            Language::Chinese => "模型路径已就绪：{}",
         }
     }
 
     fn no_default_model(&self) -> &'static str {
         match self {
-            Language::English => "No default model path configured. Please select a GGUF file.",
-            Language::Chinese => "尚未配置默认模型路径，请选择一个 GGUF 文件。",
+            Language::English => "No model path available. Please select a GGUF file.",
+            Language::Chinese => "当前没有可用的模型路径，请选择一个 GGUF 文件。",
         }
     }
 
@@ -348,6 +346,7 @@ impl Language {
 enum AppError {
     Git(git2::Error),
     Io(io::Error),
+    InputClosed,
     Custom(String),
 }
 
@@ -356,6 +355,7 @@ impl fmt::Display for AppError {
         match self {
             AppError::Git(e) => write!(f, "Git error: {e}"),
             AppError::Io(e) => write!(f, "IO error: {e}"),
+            AppError::InputClosed => write!(f, "Input stream closed"),
             AppError::Custom(msg) => write!(f, "{msg}"),
         }
     }
@@ -1242,7 +1242,10 @@ fn get_user_input(prompt: &str) -> Result<String> {
     print!("{prompt}");
     io::stdout().flush()?;
     let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+    let bytes = io::stdin().read_line(&mut input)?;
+    if bytes == 0 {
+        return Err(AppError::InputClosed);
+    }
     Ok(input.trim().to_string())
 }
 
@@ -1346,6 +1349,78 @@ fn models_root_dir() -> Result<PathBuf> {
     }
 }
 
+fn model_record_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(home) = home_dir() {
+        candidates.push(home.join(".cache/git-ca/default-model.path"));
+    }
+    if let Ok(current) = env::current_dir() {
+        candidates.push(current.join(".git-ca/default-model.path"));
+    }
+    candidates
+}
+
+fn load_persisted_model_path() -> Option<String> {
+    for record in model_record_candidates() {
+        if !record.is_file() {
+            continue;
+        }
+        match fs::read_to_string(&record) {
+            Ok(contents) => {
+                let trimmed = contents.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+            Err(err) => {
+                eprintln!(
+                    "[git-ca] warning: could not read persisted model path ({}): {err}",
+                    record.display()
+                );
+            }
+        }
+    }
+    None
+}
+
+fn persist_model_path(path: &Path) {
+    let mut last_error: Option<String> = None;
+    let serialized = path.to_string_lossy();
+    for record in model_record_candidates() {
+        if let Some(parent) = record.parent() {
+            if let Err(err) = fs::create_dir_all(parent) {
+                last_error = Some(err.to_string());
+                continue;
+            }
+        }
+        match fs::write(&record, serialized.as_ref()) {
+            Ok(_) => return,
+            Err(err) => {
+                last_error = Some(err.to_string());
+            }
+        }
+    }
+    if let Some(err) = last_error {
+        eprintln!(
+            "[git-ca] warning: could not persist model path ({}): {err}",
+            path.display()
+        );
+    }
+}
+
+fn clear_persisted_model_path() {
+    for record in model_record_candidates() {
+        if record.is_file() {
+            if let Err(err) = fs::remove_file(&record) {
+                eprintln!(
+                    "[git-ca] warning: could not clear cached model path ({}): {err}",
+                    record.display()
+                );
+            }
+        }
+    }
+}
+
 fn is_gguf(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
@@ -1398,15 +1473,6 @@ fn find_local_models() -> Vec<PathBuf> {
 
     found.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
     found
-}
-
-fn get_context_size(git_config: &GitConfig) -> i32 {
-    git_config
-        .get(CONFIG_CONTEXT_KEY)
-        .ok()
-        .and_then(|value| value.parse::<i32>().ok())
-        .map(|val| val.clamp(512, 8192))
-        .unwrap_or(DEFAULT_CONTEXT_SIZE)
 }
 
 fn download_model_from_hub(repo_id: &str, language: &Language) -> Result<PathBuf> {
@@ -1476,10 +1542,7 @@ fn download_model_from_hub(repo_id: &str, language: &Language) -> Result<PathBuf
     Ok(canonical)
 }
 
-fn ensure_default_model(
-    git_config: &mut GitConfig,
-    language: &Language,
-) -> Result<Option<PathBuf>> {
+fn ensure_default_model(language: &Language) -> Result<Option<PathBuf>> {
     if find_local_models().is_empty() {
         println!(
             "{}",
@@ -1488,54 +1551,70 @@ fn ensure_default_model(
                 .replace("{}", DEFAULT_MODEL_REPO)
         );
         let downloaded = download_model_from_hub(DEFAULT_MODEL_REPO, language)?;
-        let path_str = downloaded.to_string_lossy().to_string();
-        git_config.set(CONFIG_MODEL_KEY, &path_str)?;
+        let canonical = fs::canonicalize(&downloaded).unwrap_or(downloaded);
+        persist_model_path(&canonical);
         println!(
             "{}",
-            language.model_set_as_default().replace("{}", &path_str)
+            language
+                .model_set_as_default()
+                .replace("{}", &canonical.to_string_lossy())
         );
-        return Ok(Some(downloaded));
+        return Ok(Some(canonical));
     }
 
     Ok(None)
 }
 
-fn get_model_path(git_config: &mut GitConfig, language: &Language) -> Result<PathBuf> {
-    if let Some(downloaded) = ensure_default_model(git_config, language)? {
+fn get_model_path(language: &Language) -> Result<PathBuf> {
+    if let Some(stored) = load_persisted_model_path() {
+        let expanded = expand_model_path(&stored);
+        if expanded.is_file() && is_gguf(&expanded) {
+            let canonical = fs::canonicalize(&expanded).unwrap_or(expanded);
+            println!(
+                "{}",
+                language
+                    .model_set_as_default()
+                    .replace("{}", &canonical.to_string_lossy())
+            );
+            return Ok(canonical);
+        } else {
+            println!(
+                "{}",
+                language
+                    .model_file_missing()
+                    .replace("{}", &expanded.to_string_lossy())
+            );
+            clear_persisted_model_path();
+        }
+    }
+
+    if let Some(downloaded) = ensure_default_model(language)? {
         return Ok(downloaded);
     }
 
-    loop {
-        match git_config.get(CONFIG_MODEL_KEY) {
-            Ok(model) => {
-                let expanded = expand_model_path(&model);
-                if expanded.is_file() && is_gguf(&expanded) {
-                    return Ok(expanded);
-                }
-                println!(
-                    "{}",
-                    language
-                        .model_file_missing()
-                        .replace("{}", &expanded.to_string_lossy())
-                );
-                println!("{}", language.download_model_prompt());
-                println!("{}", language.model_pull_hint());
-            }
-            Err(_) => {
-                println!("{}", language.no_default_model());
-                println!("{}", language.model_pull_hint());
-            }
-        }
-
-        let new_model = select_default_model(git_config, language)?;
-        let expanded = expand_model_path(&new_model);
-        if expanded.is_file() && is_gguf(&expanded) {
-            return Ok(expanded);
-        }
+    let models = find_local_models();
+    if models.is_empty() {
+        println!("{}", language.no_default_model());
+        println!("{}", language.model_pull_hint());
+        return select_model_path(language);
     }
+
+    if models.len() == 1 {
+        let canonical = fs::canonicalize(&models[0]).unwrap_or_else(|_| models[0].clone());
+        persist_model_path(&canonical);
+        println!(
+            "{}",
+            language
+                .model_set_as_default()
+                .replace("{}", &canonical.to_string_lossy())
+        );
+        return Ok(canonical);
+    }
+
+    select_model_path(language)
 }
 
-fn select_default_model(git_config: &mut GitConfig, language: &Language) -> Result<String> {
+fn select_model_path(language: &Language) -> Result<PathBuf> {
     println!("{}", language.fetching_models());
 
     let models = find_local_models();
@@ -1549,10 +1628,42 @@ fn select_default_model(git_config: &mut GitConfig, language: &Language) -> Resu
         }
     }
 
+    if !io::stdin().is_terminal() {
+        if let Some(first) = models.first() {
+            let canonical = fs::canonicalize(first).unwrap_or_else(|_| first.clone());
+            persist_model_path(&canonical);
+            println!(
+                "{}",
+                language
+                    .model_set_as_default()
+                    .replace("{}", &canonical.to_string_lossy())
+            );
+            return Ok(canonical);
+        }
+        return Err(AppError::Custom(language.no_models_found().to_string()));
+    }
+
     println!("{}", language.enter_model_path_hint());
 
     loop {
-        let input = get_user_input(&language.select_model_prompt())?;
+        let input = match get_user_input(&language.select_model_prompt()) {
+            Ok(value) => value,
+            Err(AppError::InputClosed) => {
+                if let Some(first) = models.first() {
+                    let canonical = fs::canonicalize(first).unwrap_or_else(|_| first.clone());
+                    persist_model_path(&canonical);
+                    println!(
+                        "{}",
+                        language
+                            .model_set_as_default()
+                            .replace("{}", &canonical.to_string_lossy())
+                    );
+                    return Ok(canonical);
+                }
+                return Err(AppError::InputClosed);
+            }
+            Err(err) => return Err(err),
+        };
         let trimmed = input.trim();
 
         if trimmed.is_empty() {
@@ -1564,10 +1675,14 @@ fn select_default_model(git_config: &mut GitConfig, language: &Language) -> Resu
             if index > 0 && index <= models.len() {
                 let selected = fs::canonicalize(&models[index - 1])
                     .unwrap_or_else(|_| models[index - 1].clone());
-                let value = selected.to_string_lossy().to_string();
-                git_config.set(CONFIG_MODEL_KEY, &value)?;
-                println!("{}", language.model_set_as_default().replace("{}", &value));
-                return Ok(value);
+                persist_model_path(&selected);
+                println!(
+                    "{}",
+                    language
+                        .model_set_as_default()
+                        .replace("{}", &selected.to_string_lossy())
+                );
+                return Ok(selected);
             } else {
                 println!("{}", language.invalid_selection());
                 continue;
@@ -1591,10 +1706,14 @@ fn select_default_model(git_config: &mut GitConfig, language: &Language) -> Resu
         }
 
         let canonical = fs::canonicalize(&candidate).unwrap_or(candidate);
-        let value = canonical.to_string_lossy().to_string();
-        git_config.set(CONFIG_MODEL_KEY, &value)?;
-        println!("{}", language.model_set_as_default().replace("{}", &value));
-        return Ok(value);
+        persist_model_path(&canonical);
+        println!(
+            "{}",
+            language
+                .model_set_as_default()
+                .replace("{}", &canonical.to_string_lossy())
+        );
+        return Ok(canonical);
     }
 }
 
@@ -1759,7 +1878,7 @@ fn main() -> Result<()> {
     if args.len() > 1 {
         match args[1].as_str() {
             "doctor" => {
-                run_doctor(&mut git_config, &language)?;
+                run_doctor(&language)?;
                 return Ok(());
             }
             "model" => {
@@ -1770,15 +1889,16 @@ fn main() -> Result<()> {
                     }
                     let repo_id = &args[3];
                     let downloaded = download_model_from_hub(repo_id, &language)?;
-                    let path_str = downloaded.to_string_lossy().to_string();
-                    git_config.set(CONFIG_MODEL_KEY, &path_str)?;
+                    persist_model_path(&downloaded);
                     println!(
                         "{}",
-                        language.model_set_as_default().replace("{}", &path_str)
+                        language
+                            .model_set_as_default()
+                            .replace("{}", &downloaded.to_string_lossy())
                     );
                     return Ok(());
                 } else {
-                    select_default_model(&mut git_config, &language)?;
+                    select_model_path(&language)?;
                     return Ok(());
                 }
             }
@@ -1790,7 +1910,7 @@ fn main() -> Result<()> {
         }
     }
 
-    let model_path = get_model_path(&mut git_config, &language)?;
+    let model_path = get_model_path(&language)?;
 
     let current_dir = env::current_dir()?;
     let repo_path = find_git_repository(&current_dir)
@@ -1807,7 +1927,7 @@ fn main() -> Result<()> {
     }
 
     let diff = get_diff()?;
-    let context_size = get_context_size(&git_config);
+    let context_size = DEFAULT_CONTEXT_SIZE;
     let mut commit_msg = match analyze_diff(&diff, &model_path, &language, context_size)? {
         Some(msg) => msg,
         None => {
@@ -1865,11 +1985,11 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_doctor(git_config: &mut GitConfig, language: &Language) -> Result<()> {
+fn run_doctor(language: &Language) -> Result<()> {
     println!("Running llama.cpp smoke test…");
 
-    let context_size = get_context_size(git_config);
-    let model_path = get_model_path(git_config, language)?;
+    let context_size = DEFAULT_CONTEXT_SIZE;
+    let model_path = get_model_path(language)?;
 
     println!("Using model: {}", model_path.to_string_lossy());
     println!("Context length: {}", context_size);

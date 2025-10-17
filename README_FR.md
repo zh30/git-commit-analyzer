@@ -69,9 +69,10 @@ Lors de la première exécution, choisissez le chemin du modèle. À chaque invo
 
 ### Configuration
 
-- `git ca model` — sélectionne interactivement un modèle, stocké dans `commit-analyzer.model`.
+- `git ca model` — sélectionne interactivement un modèle et réutilise ce chemin GGUF pour les exécutions suivantes.
+- En mode non interactif, le modèle mémorisé est utilisé ou, à défaut, le premier GGUF détecté.
 - `git ca language` — bascule les prompts entre anglais et chinois, stocké dans `commit-analyzer.language`.
-- `git config --global commit-analyzer.context 1024` — règle la longueur de contexte llama (512–8192). Le résumé du diff respecte automatiquement cette valeur.
+- La longueur de contexte de llama est fixée à 1024 tokens.
 
 ## Développement
 

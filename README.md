@@ -69,9 +69,10 @@ During the first run you will be asked to choose a model path. For each invocati
 
 ### Configuration
 
-- `git ca model` — interactive model selector; stored in `commit-analyzer.model`.
+- `git ca model` — interactive model selector; the chosen GGUF path is reused on future runs.
+- Non-interactive runs reuse the persisted model or fall back to the first detected GGUF.
 - `git ca language` — choose English or Simplified Chinese prompts; stored in `commit-analyzer.language`.
-- `git config --global commit-analyzer.context 1024` — override llama context length (512–8192). The diff summariser respects this limit automatically.
+- Llama context length is fixed to 1024 tokens.
 
 ## Development
 

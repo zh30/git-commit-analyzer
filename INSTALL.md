@@ -53,21 +53,21 @@ git add <files>
 git ca
 ```
 
-On initial launch the CLI scans common directories (`./models`, `~/Library/Application Support/git-ca/models`, `~/.cache/git-ca/models`) for GGUF models. If none are found it can download the default model from Hugging Face and store the absolute path in:
-- `commit-analyzer.model`
+On initial launch the CLI scans common directories (`./models`, `~/Library/Application Support/git-ca/models`, `~/.cache/git-ca/models`) for GGUF models. If none are found it can download the default model from Hugging Face and cache it locally.
 
 ### Additional configuration
 
-- `git ca model` — interactive model selector
+- `git ca model` — interactive model selector (persisted for future runs)
+- Non-interactive runs reuse the saved model or fall back to the first detected GGUF.
 - `git ca language` — choose English or Simplified Chinese prompts
-- `git config --global commit-analyzer.context 1024` — adjust llama context window (512–8192)
+- Llama context window is fixed at 1024 tokens
 
 ## 6. Troubleshooting
 
 ### Model not found
-- Verify the path returned by `git config commit-analyzer.model`.
-- Ensure the GGUF file exists and is readable.
-- Run `git ca model` to reselect the file.
+- Ensure at least one GGUF file exists in the default search directories.
+- Confirm the GGUF file is readable.
+- Run `git ca model` to select the file interactively.
 
 ### Build failures
 - Check that `cmake`, `make`, and a C/C++ compiler are available (`cmake --version`, `cc --version`).
@@ -75,7 +75,7 @@ On initial launch the CLI scans common directories (`./models`, `~/Library/Appli
 - On Linux install build essentials (`apt install build-essential cmake` or distro equivalent).
 
 ### llama.cpp context errors
-- Reduce context size: `git config --global commit-analyzer.context 768`.
+- Context is fixed to 1024 tokens; trim large staged changes or use a smaller model.
 - Verify available GPU/CPU memory; large models may exceed device limits.
 
 ### Command not found
@@ -87,9 +87,7 @@ On initial launch the CLI scans common directories (`./models`, `~/Library/Appli
 ```bash
 rm -f ~/.git-plugins/git-ca
 sed -i '' '/git-plugins/d' ~/.bashrc   # adjust for your shell/OS
-git config --global --unset commit-analyzer.model 2>/dev/null
 git config --global --unset commit-analyzer.language 2>/dev/null
-git config --global --unset commit-analyzer.context 2>/dev/null
 ```
 
 ## 8. Support

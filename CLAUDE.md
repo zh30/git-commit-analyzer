@@ -5,7 +5,7 @@ Guidance for Claude Code (claude.ai/code) when working inside this repository.
 ## Project Overview
 - **Purpose**: CLI helper that generates Git Flow–style commit messages from staged changes.
 - **Runtime**: Pure Rust binary (`bin = "git-ca"`). No web services or VS Code extension.
-- **AI Backend**: Local llama.cpp inference via the `llama_cpp_sys_2` crate. Models are GGUF files referenced through Git config (`commit-analyzer.model`).
+- **AI Backend**: Local llama.cpp inference via the `llama_cpp_sys_2` crate. Models are GGUF files discovered in local directories, with the chosen path persisted for subsequent runs (non-interactive invocations reuse the stored path or the first match).
 - **Prompt Workflow**: Staged diff is summarised, validated, and fed to the model; invalid output triggers retries or a deterministic fallback.
 
 ## Key Dependencies
@@ -23,10 +23,9 @@ Guidance for Claude Code (claude.ai/code) when working inside this repository.
 - `src/llama.rs` — wrapper around llama.cpp session lifecycle (`LlamaSession::new` / `infer`).
 - No additional crates, workspaces, or extensions.
 
-## Configuration Keys
-- `commit-analyzer.model` — path to the GGUF model.
+## Configuration
 - `commit-analyzer.language` — prompt language (`en`, `zh`).
-- `commit-analyzer.context` — llama context length (512–8192). The diff summariser honours this limit.
+- Llama context length is fixed to 1024 tokens; model paths are chosen interactively.
 
 ## Development Commands
 ```bash
@@ -42,7 +41,7 @@ cargo run -- git ca           # run against staged changes
 
 ## Common Tasks
 - **Add a feature**: edit `src/main.rs`, add unit tests next to the affected functions, run the command suite above, and update README(s) plus `AGENTS.md`.
-- **Adjust model handling**: update `src/llama.rs` or the `generate_fallback_commit_message` pipeline, and document new Git config keys in the READMEs.
+- **Adjust model handling**: update `src/llama.rs` or the `generate_fallback_commit_message` pipeline, and refresh documentation covering runtime model selection.
 - **Modify prompts**: touch `build_diff_summary`, `build_commit_prompt`, or language strings in `Language` enum; update multilingual READMEs accordingly.
 
 ## Distribution

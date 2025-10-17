@@ -69,9 +69,10 @@ git ca
 
 ### 配置命令
 
-- `git ca model` — 交互式设置模型路径，写入 `commit-analyzer.model`。
+- `git ca model` — 交互式选择模型路径，所选 GGUF 会在后续运行中复用。
+- 非交互模式优先使用已保存的模型，否则自动使用检测到的第一个 GGUF。
 - `git ca language` — 切换提示语言（英文/中文），写入 `commit-analyzer.language`。
-- `git config --global commit-analyzer.context 1024` — 设置 llama 上下文长度（512–8192），diff 摘要会自动遵守该限制。
+- llama 上下文长度固定为 1024 tokens。
 
 ## 开发指引
 

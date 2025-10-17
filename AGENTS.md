@@ -9,7 +9,7 @@ The CLI entrypoint, prompt workflow, and llama.cpp bindings live in `src/main.rs
 - `cargo fmt` — enforce rustfmt defaults (4-space indent, 100-column width).
 - `cargo clippy -- -D warnings` — lint with warnings treated as build failures.
 - `cargo test` — execute all unit tests; run before every commit and PR.
-- `git config --global commit-analyzer.context 1024` — adjust llama.cpp context length (512–8192) when you need a different performance envelope.
+- Llama.cpp context length is fixed to 1024 tokens.
 
 ## Coding Style & Naming Conventions
 Use `snake_case` for functions/files, `CamelCase` for types/enums, and `SCREAMING_SNAKE_CASE` for constants such as `COMMIT_TYPES`. Let rustfmt manage alignment and spacing. Prefer error propagation with `?`, returning `AppError::Custom` only when you need a user-facing message. Comments should explain non-obvious Git plumbing or llama-specific constraints; avoid restating what the code already conveys.
@@ -21,4 +21,4 @@ Unit tests live in `#[cfg(test)]` modules with descriptive names like `handles_r
 Follow the existing Conventional Commit style—examples include `feat(cli): simplify prompt`, `fix(llama): handle kv cache reset`, `chore(deps): update dependencies`. Each PR must summarise behavior changes, list verification steps (tests, manual runs), and update affected docs (`README*.md`, `DEPLOY.md`, `CLAUDE.md`). Link relevant issues and include terminal captures when altering user-visible prompts or installer UX.
 
 ## Model & Configuration Tips
-By default the tool expects a llama.cpp-compatible model recorded under `commit-analyzer.model`; use `git config commit-analyzer.model /path/to/model.gguf` to override. Document any alternative endpoints or model defaults in `DEPLOY.md` before merging. Store credentials in ignored env files, not in tracked sources, and confirm large lockfiles remain ignored or summarized automatically by the diff truncation logic.
+By default the tool scans `./models` and cache directories for llama.cpp-compatible GGUF files, persists the user's selection, and reuses it on subsequent runs. Non-interactive invocations reuse the stored model or fall back to the first discovered GGUF. Document any alternative endpoints or model defaults in `DEPLOY.md` before merging. Store credentials in ignored env files, not in tracked sources, and confirm large lockfiles remain ignored or summarized automatically by the diff truncation logic.

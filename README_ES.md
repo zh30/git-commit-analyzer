@@ -69,9 +69,10 @@ Durante la primera ejecución se le pedirá seleccionar la ruta del modelo. En c
 
 ### Configuración
 
-- `git ca model` — selector interactivo de modelos; guarda la ruta en `commit-analyzer.model`.
+- `git ca model` — selector interactivo de modelos; la ruta GGUF elegida se reutiliza en ejecuciones futuras.
+- En ejecuciones no interactivas se reutiliza el modelo guardado o, si no existe, el primer GGUF detectado.
 - `git ca language` — alterna entre prompts en inglés y chino; guarda la preferencia en `commit-analyzer.language`.
-- `git config --global commit-analyzer.context 1024` — ajusta la longitud de contexto (512–8192). El resumen del diff respeta automáticamente este valor.
+- La longitud de contexto de llama queda fijada en 1024 tokens.
 
 ## Desarrollo
 
