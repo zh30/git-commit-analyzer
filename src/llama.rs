@@ -173,15 +173,20 @@ impl LlamaSession {
 
         let mut decode_batch = unsafe { llama_batch_init(1, 0, MAX_SEQ_ID) };
         let mut decode_error: Option<String> = None;
+        let mut has_meaningful_text = false;
 
         for _ in 0..max_tokens {
-            let next_token = unsafe { self.sample_next_token(vocab_size, eos_token) };
+            let allow_eos = has_meaningful_text;
+            let next_token = unsafe { self.sample_next_token(vocab_size, eos_token, allow_eos) };
             if next_token == eos_token {
                 break;
             }
 
             let token_text = unsafe { self.token_to_string(next_token) };
             generated.push_str(&token_text);
+            if !token_text.trim().is_empty() {
+                has_meaningful_text = true;
+            }
 
             unsafe {
                 decode_batch.n_tokens = 1;
@@ -266,7 +271,12 @@ impl LlamaSession {
         Ok(())
     }
 
-    unsafe fn sample_next_token(&self, vocab_size: usize, eos_token: llama_token) -> llama_token {
+    unsafe fn sample_next_token(
+        &self,
+        vocab_size: usize,
+        eos_token: llama_token,
+        allow_eos: bool,
+    ) -> llama_token {
         let logits_ptr = llama_get_logits(self.ctx);
         if logits_ptr.is_null() {
             return eos_token;
@@ -283,6 +293,9 @@ impl LlamaSession {
 
         let top_k = SAMPLING_TOP_K.max(1).min(candidates.len());
         candidates.truncate(top_k);
+        let best_non_eos = candidates
+            .iter()
+            .find_map(|(token, _)| (*token != eos_token).then_some(*token));
 
         let temperature = SAMPLING_TEMPERATURE.max(1e-5);
         let mut scaled = Vec::with_capacity(candidates.len());
@@ -306,9 +319,8 @@ impl LlamaSession {
         }
 
         if weights.is_empty() {
-            return candidates
-                .first()
-                .map(|(token, _)| *token)
+            return best_non_eos
+                .or_else(|| candidates.first().map(|(token, _)| *token))
                 .unwrap_or(eos_token);
         }
 
@@ -339,6 +351,16 @@ impl LlamaSession {
             if filtered.is_empty() {
                 filtered.push(weights[0]);
             }
+        }
+
+        if !allow_eos {
+            filtered.retain(|(token, _)| *token != eos_token);
+        }
+
+        if filtered.is_empty() {
+            return best_non_eos
+                .or_else(|| candidates.first().map(|(token, _)| *token))
+                .unwrap_or(eos_token);
         }
 
         let total_weight: f32 = filtered.iter().map(|(_, weight)| *weight).sum();

@@ -1,7 +1,7 @@
 mod llama;
 
 use crate::llama::LlamaSession;
-use git2::{Config, IndexAddOption, Repository, Signature};
+use git2::{Commit, Config, ErrorCode, Repository, Signature};
 use hf_hub::api::sync::Api;
 use std::collections::HashSet;
 use std::env;
@@ -1916,17 +1916,18 @@ fn main() -> Result<()> {
     let repo_path = find_git_repository(&current_dir)
         .ok_or_else(|| AppError::Custom(language.not_in_git_repository().to_string()))?;
 
-    let repo = Repository::open(repo_path)?;
+    let repo = Repository::open(&repo_path)?;
     let mut index = repo.index()?;
 
-    env::set_current_dir(repo.path().parent().unwrap())?;
+    env::set_current_dir(&repo_path)?;
+    index.read(true)?;
 
-    if index.add_all(["*"], IndexAddOption::DEFAULT, None).is_err() {
+    let diff = get_diff()?;
+    if diff.trim().is_empty() {
         println!("{}", language.no_changes_staged());
         return Ok(());
     }
 
-    let diff = get_diff()?;
     let context_size = DEFAULT_CONTEXT_SIZE;
     let mut commit_msg = match analyze_diff(&diff, &model_path, &language, context_size)? {
         Some(msg) => msg,
@@ -1965,7 +1966,20 @@ fn main() -> Result<()> {
     let signature = Signature::now(&name, &email)?;
     let tree_id = index.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
-    let parent_commit = repo.head()?.peel_to_commit()?;
+    let parents = match repo.head() {
+        Ok(head) => match head.peel_to_commit() {
+            Ok(commit) => vec![commit],
+            Err(err) if matches!(err.code(), ErrorCode::NotFound | ErrorCode::UnbornBranch) => {
+                Vec::new()
+            }
+            Err(err) => return Err(err.into()),
+        },
+        Err(err) if matches!(err.code(), ErrorCode::UnbornBranch | ErrorCode::NotFound) => {
+            Vec::new()
+        }
+        Err(err) => return Err(err.into()),
+    };
+    let parent_refs: Vec<&Commit> = parents.iter().collect();
 
     repo.commit(
         Some("HEAD"),
@@ -1973,7 +1987,7 @@ fn main() -> Result<()> {
         &signature,
         &commit_msg,
         &tree,
-        &[&parent_commit],
+        &parent_refs,
     )?;
 
     println!("{}", language.changes_committed());
