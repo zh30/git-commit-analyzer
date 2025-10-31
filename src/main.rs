@@ -422,32 +422,36 @@ fn build_commit_prompt(diff: &str, language: &Language, attempt: usize) -> Strin
     match language {
         Language::English => {
             let mut prompt = format!(
-                r#"Analyze this git diff and produce a single commit message in Git Flow format:
+                r#"SYSTEM: You are a commit message generator. You must output ONLY a commit message, nothing else.
 
-<type>(<scope>): <subject>
+TASK: Analyze the git diff below and produce exactly ONE commit message in Git Flow format.
 
-- <type> must be one of: feat, fix, docs, style, refactor, test, chore.
-- <scope> is optional; prefer kebab-case or omit when unnecessary.
-- <subject> should be a concise imperative (<= 72 characters recommended).
-- You may include brief body paragraphs after a blank line when helpful.
+FORMAT: <type>(<scope>): <subject>
 
-Rules:
-1. Choose exactly one <type> that best represents the diff.
-2. Summarize all staged changes without referencing issue or PR numbers.
-3. Write the entire commit message in English.
-4. The response must contain the commit message only (subject plus optional body) with no extra commentary, markdown fences, or explanations.
-5. The first line must strictly follow `<type>(<scope>): <subject>` or `<type>: <subject>`. No other lines should precede it.
+EXAMPLES:
+- feat(api): add user authentication endpoint
+- fix(cli): resolve model loading timeout
+- docs: update installation instructions
+- refactor(llama): simplify token sampling logic
+- chore(deps): update dependencies
+- test: add unit tests for diff parsing
 
-Here is the diff to analyze:
+RULES:
+1. <type> MUST be one of: feat, fix, docs, style, refactor, test, chore
+2. <scope> is optional, use kebab-case when needed (e.g., cli, api, docs)
+3. <subject> is imperative, concise (<= 72 chars)
+4. NO explanations, NO markdown fences, NO extra text
+5. Output ONLY the commit message, nothing else
 
+HERE IS THE DIFF:
 {diff}
 
-Respond with the commit message only."#
+YOUR OUTPUT (commit message only):"#
             );
 
             if attempt > 0 {
                 prompt.push_str(
-                    "\n\nReminder: your previous response did not follow the required format. Output exactly one commit message beginning with `<type>(<scope>): <subject>` (scope optional). Do not include explanations, bullet lists, or any extra lines.",
+                    "\n\nCRITICAL: Previous output was invalid. You MUST output ONLY a commit message starting with '<type>(<scope>): <subject>'. NO other text, explanations, or formatting.",
                 );
             }
 
@@ -455,31 +459,36 @@ Respond with the commit message only."#
         }
         Language::Chinese => {
             let mut prompt = format!(
-                r#"分析以下 git diff，并生成一个符合 Git Flow 格式的提交信息：
+                r#"系统：你是一个提交信息生成器。必须只输出提交信息，不输出其他内容。
 
-<类型>(<范围>): <主题>
+任务：分析下面的 git diff，生成一个符合 Git Flow 格式的提交信息。
 
-- <类型> 必须是：feat、fix、docs、style、refactor、test、chore 中的一个。
-- <范围> 可选，推荐使用 kebab-case；如无必要可省略。
-- <主题> 需使用祈使语气并保持精炼（建议不超过 72 个字符）。
-- 如有需要，可在空行后添加简短正文段落。
+格式：<类型>(<范围>): <主题>
+
+示例：
+- feat(api): 添加用户认证接口
+- fix(cli): 解决模型加载超时问题
+- docs: 更新安装说明
+- refactor(llama): 简化令牌采样逻辑
+- chore(deps): 更新依赖包
+- test: 添加 diff 解析单元测试
 
 规则：
-1. 仅选择一个最能代表此次变更的 <类型>。
-2. 概括所有已暂存的更改，不要引用 issue 或 PR 编号。
-3. 提交信息的内容必须使用简体中文（类型关键字除外）。
-4. 回复中只能包含提交信息本身（主题与可选正文），不得附带额外说明或标记。
-5. 首行必须严格遵循 `<类型>(<范围>): <主题>` 或 `<类型>: <主题>`（范围可选），且前面不能出现其他内容。
+1. <类型> 必须是：feat、fix、docs、style、refactor、test、chore 之一
+2. <范围> 可选，使用 kebab-case（如 cli、api、docs）
+3. <主题> 使用祈使语气，简练（≤72 字符）
+4. 不输出解释、不使用 markdown、不添加额外文字
+5. 只输出提交信息本身，无其他内容
 
 以下是需要分析的 diff：
 
 {diff}
 
-请仅返回提交信息。"#,
+你的输出（仅提交信息）："#
             );
 
             if attempt > 0 {
-                prompt.push_str("\n\n提醒：上一次的输出不符合要求，请仅返回符合格式的提交信息，不要添加任何解释或说明。");
+                prompt.push_str("\n\n重要：上次输出无效。必须仅输出以 '<类型>(<范围>): <主题>' 开头的提交信息，不要其他文字、解释或格式。");
             }
 
             prompt
@@ -1943,21 +1952,26 @@ fn main() -> Result<()> {
         }
     };
 
-    loop {
-        let choice = get_user_input(&language.use_edit_cancel_prompt())?;
+    if io::stdin().is_terminal() {
+        loop {
+            let choice = get_user_input(&language.use_edit_cancel_prompt())?;
 
-        match choice.to_lowercase().as_str() {
-            "u" => break,
-            "e" => {
-                commit_msg = get_user_input(&language.enter_commit_message())?;
-                break;
+            match choice.to_lowercase().as_str() {
+                "u" => break,
+                "e" => {
+                    commit_msg = get_user_input(&language.enter_commit_message())?;
+                    break;
+                }
+                "c" => {
+                    println!("{}", language.commit_cancelled());
+                    return Ok(());
+                }
+                _ => println!("{}", language.invalid_choice()),
             }
-            "c" => {
-                println!("{}", language.commit_cancelled());
-                return Ok(());
-            }
-            _ => println!("{}", language.invalid_choice()),
         }
+    } else {
+        // Non-interactive mode: automatically use the generated message
+        println!("\n[git-ca] Non-interactive mode detected. Using generated commit message.");
     }
 
     let name = git_config.get_or_prompt("user.name", &language.enter_name_prompt())?;
