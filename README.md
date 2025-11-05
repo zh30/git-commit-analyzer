@@ -12,7 +12,7 @@ Git Commit Analyzer is a Rust-based Git plugin that generates Git Flow–style c
 - **Interactive CLI**: Review, edit, or cancel the generated commit message.
 - **Multi-language prompts**: English (default) and Simplified Chinese.
 - **Configurable context**: Tune llama context length via Git configuration.
-- **Multi-platform binaries**: Pre-built binaries for macOS (Intel & Apple Silicon) and Linux.
+- **Multi-platform binaries**: Pre-built binaries for macOS (Intel & Apple Silicon).
 
 ## Requirements
 
@@ -23,7 +23,7 @@ Git Commit Analyzer is a Rust-based Git plugin that generates Git Flow–style c
 
 ### Homebrew (Recommended) - Fast Binary Installation
 
-**macOS and Linux users can install via Homebrew with pre-built binaries (no Rust compilation required):**
+**macOS users can install via Homebrew with pre-built binaries (no Rust compilation required):**
 
 ```bash
 brew tap zh30/tap
@@ -32,9 +32,10 @@ brew install git-ca
 
 This installs a pre-built binary for your platform:
 - **macOS**: Apple Silicon (M1/M2/M3) and Intel (x86_64)
-- **Linux**: x86_64 and ARM64
 
 No Rust toolchain or compilation needed!
+
+**Note**: Linux builds are temporarily disabled due to compilation issues. Windows builds are available via [GitHub Releases](https://github.com/zh30/git-commit-analyzer/releases).
 
 ### Manual Installation
 
@@ -52,20 +53,8 @@ curl -L -o git-ca https://github.com/zh30/git-commit-analyzer/releases/download/
 tar -xzf git-ca-1.1.2-apple-darwin-x86_64.tar.gz
 sudo mv git-ca /usr/local/bin/
 chmod +x /usr/local/bin/git-ca
-
-# Linux (x86_64)
-curl -L -o git-ca https://github.com/zh30/git-commit-analyzer/releases/download/v1.1.2/git-ca-1.1.2-unknown-linux-gnu-x86_64.tar.gz
-tar -xzf git-ca-1.1.2-unknown-linux-gnu-x86_64.tar.gz
-sudo mv git-ca /usr/local/bin/
-chmod +x /usr/local/bin/git-ca
-
-# Linux (ARM64)
-curl -L -o git-ca https://github.com/zh30/git-commit-analyzer/releases/download/v1.1.2/git-ca-1.1.2-unknown-linux-gnu-arm64.tar.gz
-tar -xzf git-ca-1.1.2-unknown-linux-gnu-arm64.tar.gz
-sudo mv git-ca /usr/local/bin/
-chmod +x /usr/local/bin/git-ca
 ```
-**Note**: Windows builds are available via [GitHub Releases](https://github.com/zh30/git-commit-analyzer/releases) but not distributed via Homebrew.
+**Note**: Linux builds are temporarily disabled due to compilation issues. Windows builds are available via [GitHub Releases](https://github.com/zh30/git-commit-analyzer/releases).
 
 ### Build from Source
 
@@ -145,11 +134,12 @@ Key modules:
 Releases are automated via GitHub Actions:
 
 1. Push a version tag: `git tag v1.1.2 && git push origin v1.1.2`
-2. GitHub Actions builds binaries for macOS and Linux (4 platforms total)
+2. GitHub Actions builds binaries for macOS only (2 platforms: Intel & Apple Silicon)
 3. Binaries are uploaded to GitHub Releases
 4. Homebrew formula is automatically updated with bottle checksums
 5. `homebrew-tap` repository receives the updated formula
-   - **Note**: Windows builds are generated but only distributed via GitHub Releases
+   - **Note**: Linux builds are temporarily disabled due to compilation issues
+   - Windows builds are available via GitHub Releases
 
 See [DEPLOY.md](DEPLOY.md) for complete release documentation.
 

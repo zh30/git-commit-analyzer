@@ -51,8 +51,9 @@ jobs:
           # Extract checksums for each platform
           ARM64_MACOS=$(grep "apple-darwin-arm64" checksums.txt | awk '{print $1}')
           X86_64_MACOS=$(grep "apple-darwin-x86_64" checksums.txt | awk '{print $1}')
-          ARM64_LINUX=$(grep "unknown-linux-gnu-arm64" checksums.txt | awk '{print $1}')
-          X86_64_LINUX=$(grep "unknown-linux-gnu-x86_64" checksums.txt | awk '{print $1}')
+          # Linux builds disabled
+          ARM64_LINUX="DISABLED_LINUX"
+          X86_64_LINUX="DISABLED_LINUX"
 
           echo "ARM64_MACOS=${ARM64_MACOS}" >> $GITHUB_OUTPUT
           echo "X86_64_MACOS=${X86_64_MACOS}" >> $GITHUB_OUTPUT
@@ -62,10 +63,9 @@ jobs:
           echo "Checksums extracted:"
           echo "  ARM64 macOS: ${ARM64_MACOS}"
           echo "  x86_64 macOS: ${X86_64_MACOS}"
-          echo "  ARM64 Linux: ${ARM64_LINUX}"
-          echo "  x86_64 Linux: ${X86_64_LINUX}"
           echo ""
-          echo "Note: Windows builds are available via GitHub Releases but not distributed via Homebrew"
+          echo "Note: Linux builds are disabled due to compilation issues"
+          echo "      Windows builds are available via GitHub Releases but not distributed via Homebrew"
 
       - name: Update Homebrew formula with bottle checksums
         run: |

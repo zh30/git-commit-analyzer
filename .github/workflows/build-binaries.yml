@@ -25,15 +25,15 @@ jobs:
             os: macos-14
             arch: arm64
             suffix: apple-darwin-arm64
-          # Linux
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
-            arch: x86_64
-            suffix: unknown-linux-gnu-x86_64
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04
-            arch: arm64
-            suffix: unknown-linux-gnu-arm64
+          # Linux (Disabled - Uncomment if needed)
+          # - target: x86_64-unknown-linux-gnu
+          #   os: ubuntu-22.04
+          #   arch: x86_64
+          #   suffix: unknown-linux-gnu-x86_64
+          # - target: aarch64-unknown-linux-gnu
+          #   os: ubuntu-22.04
+          #   arch: arm64
+          #   suffix: unknown-linux-gnu-arm64
           # Windows (Disabled - Uncomment if needed)
           # - target: x86_64-pc-windows-msvc
           #   os: windows-2022
@@ -160,12 +160,6 @@ jobs:
             ### macOS (Intel)
             - [git-ca-${{ steps.get_version.outputs.VERSION }}-apple-darwin-x86_64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}-apple-darwin-x86_64.tar.gz)
 
-            ### Linux (x86_64)
-            - [git-ca-${{ steps.get_version.outputs.VERSION }}-unknown-linux-gnu-x86_64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}-unknown-linux-gnu-x86_64.tar.gz)
-
-            ### Linux (ARM64)
-            - [git-ca-${{ steps.get_version.outputs.VERSION }}-unknown-linux-gnu-arm64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}-unknown-linux-gnu-arm64.tar.gz)
-
             ## Installation
 
             ### Using Homebrew (Recommended)
@@ -177,7 +171,7 @@ jobs:
             ### From Release
             Download the appropriate archive for your platform and extract it:
             ```bash
-            # macOS/Linux
+            # macOS
             tar -xzf git-ca-VERSION-PLATFORM.tar.gz
             sudo mv git-ca /usr/local/bin/
             ```

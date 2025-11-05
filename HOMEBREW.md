@@ -8,10 +8,12 @@
 
 ### 支持的平台
 - **macOS**: Apple Silicon (arm64) 和 Intel (x86_64)
-- **Linux**: x86_64 和 ARM64
 
-### Windows 支持
-Windows 平台的二进制包会通过 GitHub Releases 发布，但不在 Homebrew 中分发。如需 Windows 版本，请直接从 [Releases](https://github.com/zh30/git-commit-analyzer/releases) 页面下载。
+### Linux 和 Windows 支持
+- **Linux**: 暂时禁用，由于编译问题
+- **Windows**: 平台的二进制包会通过 GitHub Releases 发布，但不在 Homebrew 中分发
+
+如需 Linux 或 Windows 版本，请直接从 [Releases](https://github.com/zh30/git-commit-analyzer/releases) 页面下载，或参考 `.github/workflows/build-binaries.yml` 启用构建。
 
 ### 发布流程
 
@@ -24,12 +26,11 @@ Windows 平台的二进制包会通过 GitHub Releases 发布，但不在 Homebr
    - GitHub Actions 会自动触发 `build-binaries.yml` 工作流
 
 2. **构建阶段**：
-   - 在多个平台上并行构建二进制包：
+   - 在 macOS 上构建二进制包：
      - macOS 13 (x86_64)
      - macOS 14 (ARM64)
-     - Ubuntu 22.04 (x86_64, ARM64)
    - 构建完成后自动上传二进制包到 GitHub Release
-   - **注意**：Windows 构建已禁用，如需启用请参考 `.github/workflows/build-binaries.yml`
+   - **注意**：Linux 和 Windows 构建已禁用，如需启用请参考 `.github/workflows/build-binaries.yml`
 
 3. **更新 Homebrew**：
    - `release.yml` 工作流自动：
@@ -81,9 +82,7 @@ class GitCa < Formula
     root_url "https://github.com/zh30/git-commit-analyzer/releases/download/v#{version}"
     sha256 cellar: :any_skip_relocate, arm64_sequoia: "SHA256_ARM64_MACOS"
     sha256 cellar: :any_skip_relocate, x86_64_sequoia: "SHA256_X86_64_MACOS"
-    sha256 cellar: :any_skip_relocate, arm64_linux: "SHA256_ARM64_LINUX"
-    sha256 cellar: :any_skip_relocate, x86_64_linux: "SHA256_X86_64_LINUX"
-    # 注意：Windows 构建通过 GitHub Releases 提供，但不在 Homebrew 中分发
+    # 注意：Linux 构建禁用，Windows 构建通过 GitHub Releases 提供，但不在 Homebrew 中分发
   end
 
   # 安装时直接使用预构建二进制

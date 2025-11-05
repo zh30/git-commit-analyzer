@@ -8,7 +8,7 @@ Git Commit Analyzer now supports **multi-platform pre-built binaries** via GitHu
 
 ### Supported Platforms
 - **macOS**: Apple Silicon (arm64), Intel (x86_64)
-- **Linux**: x86_64, ARM64
+- **Linux**: Temporarily disabled due to compilation issues
 - **Windows**: Builds available via GitHub Releases (not distributed via Homebrew)
 
 ## 1. Pre-release Checklist
@@ -51,9 +51,7 @@ Triggered on:
 **Build Matrix:**
 - macOS 13 (Intel x86_64)
 - macOS 14 (Apple Silicon ARM64)
-- Ubuntu 22.04 (x86_64)
-- Ubuntu 22.04 (ARM64)
-- **Note**: Windows builds can be enabled if needed (see `.github/workflows/build-binaries.yml`)
+- **Note**: Linux and Windows builds can be enabled if needed (see `.github/workflows/build-binaries.yml`)
 
 **Process:**
 1. Checks out repository

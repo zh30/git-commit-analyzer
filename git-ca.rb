@@ -11,9 +11,8 @@ class GitCa < Formula
     root_url "https://github.com/zh30/git-commit-analyzer/releases/download/v#{version}"
     sha256 cellar: :any_skip_relocate, arm64_sequoia: "REPLACE_WITH_ARM64_MACOS_SHA256"
     sha256 cellar: :any_skip_relocate, x86_64_sequoia: "REPLACE_WITH_X86_64_MACOS_SHA256"
-    sha256 cellar: :any_skip_relocate, arm64_linux: "REPLACE_WITH_ARM64_LINUX_SHA256"
-    sha256 cellar: :any_skip_relocate, x86_64_linux: "REPLACE_WITH_X86_64_LINUX_SHA256"
-    # Note: Windows builds available via GitHub Releases but not distributed via Homebrew
+    # Note: Linux builds disabled due to compilation issues
+    #       Windows builds available via GitHub Releases but not distributed via Homebrew
   end
 
   def install
