@@ -191,6 +191,7 @@ jobs:
       - name: Update Homebrew Formula
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
 
@@ -210,9 +211,16 @@ jobs:
           echo "Source tarball SHA256: ${TARBALL_SHA256}"
 
           # Clone homebrew-tap repository
-          git clone https://x-access-token:${GITHUB_TOKEN}@github.com/zh30/homebrew-tap.git
+          git clone https://x-access-token:${TARGET_REPO_PAT}@github.com/zh30/homebrew-tap.git
 
           cd homebrew-tap
+
+          # Configure git user (required for commits)
+          git config user.email "action@github.com"
+          git config user.name "GitHub Actions"
+
+          # Ensure push uses the token (some git versions don't persist credentials)
+          git remote set-url origin https://x-access-token:${TARGET_REPO_PAT}@github.com/zh30/homebrew-tap.git
 
           # Create Formula directory if it doesn't exist
           mkdir -p Formula
