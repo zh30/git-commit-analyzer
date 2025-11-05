@@ -96,7 +96,7 @@ jobs:
           retention-days: 30
 
   release:
-    name: Create Release
+    name: Create Release and Update Homebrew
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     needs: build
@@ -134,11 +134,16 @@ jobs:
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Upload release assets
+      - name: Compute checksums
         run: |
+          mkdir checksums
           cd artifacts
           find . -name "git-ca-*" -type f | while read file; do
-            echo "Uploading $file"
+            if [[ "$file" == *.tar.gz ]]; then
+              sha256sum "$file" >> ../checksums/checksums.txt
+            elif [[ "$file" == *.zip ]]; then
+              sha256sum "$file" >> ../checksums/checksums.txt
+            fi
           done
 
       - name: Create Release
@@ -178,19 +183,91 @@ jobs:
           files: |
             artifacts/*/git-ca-*
 
-      - name: Compute checksums
-        run: |
-          mkdir checksums
-          cd artifacts
-          find . -name "git-ca-*" -type f | while read file; do
-            if [[ "$file" == *.tar.gz ]]; then
-              sha256sum "$file" >> ../checksums/checksums.txt
-            elif [[ "$file" == *.zip ]]; then
-              sha256sum "$file" >> ../checksums/checksums.txt
-            fi
-          done
-
       - name: Upload checksums
         uses: softprops/action-gh-release@v1
         with:
           files: checksums/checksums.txt
+
+      - name: Update Homebrew Formula
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+
+          # Download checksums.txt from release to extract bottle checksums
+          gh release download v${VERSION} --pattern checksums.txt --dir ./homebrew-update/
+
+          # Extract checksums for each platform
+          ARM64_MACOS=$(grep "apple-darwin-arm64" ./homebrew-update/checksums.txt | awk '{print $1}')
+          X86_64_MACOS=$(grep "apple-darwin-x86_64" ./homebrew-update/checksums.txt | awk '{print $1}')
+
+          echo "ARM64_MACOS=${ARM64_MACOS}"
+          echo "X86_64_MACOS=${X86_64_MACOS}"
+
+          # Download source tarball and calculate checksum
+          TARBALL_URL="https://github.com/${{ github.repository }}/archive/refs/tags/v${VERSION}.tar.gz"
+          TARBALL_SHA256=$(curl -L $TARBALL_URL | shasum -a 256 | awk '{print $1}')
+          echo "Source tarball SHA256: ${TARBALL_SHA256}"
+
+          # Clone homebrew-tap repository
+          git clone https://x-access-token:${GITHUB_TOKEN}@github.com/zh30/homebrew-tap.git
+
+          cd homebrew-tap
+
+          # Create the updated formula
+          cat > Formula/git-ca.rb <<EOF
+  class GitCa < Formula
+    desc "AI-powered Git plugin for generating meaningful commit messages"
+    homepage "https://github.com/zh30/git-commit-analyzer"
+    url "https://github.com/zh30/git-commit-analyzer/archive/refs/tags/v${VERSION}.tar.gz"
+    sha256 "${TARBALL_SHA256}"
+    license "MIT"
+    head "https://github.com/zh30/git-commit-analyzer.git", branch: "main"
+
+    # Bottle support for pre-built binaries
+    bottle do
+      root_url "https://github.com/zh30/git-commit-analyzer/releases/download/v${VERSION}"
+      sha256 cellar: :any_skip_relocate, arm64_sequoia: "${ARM64_MACOS}"
+      sha256 cellar: :any_skip_relocate, x86_64_sequoia: "${X86_64_MACOS}"
+    end
+
+    def install
+      bin.install "git-ca"
+    end
+
+    def caveats
+      <<~EOS
+        To use git-ca, you need a local GGUF model (llama.cpp format).
+
+        The tool will automatically download the default model
+        (unsloth/gemma-3-270m-it-GGUF) on first run, or you can:
+          - Place GGUF files in ./models directory
+          - Place GGUF files in ~/.cache/git-ca/models directory
+          - Run 'git ca model' to select a model manually
+
+        To set up a default model, run:
+          git ca model
+
+        Note: git-ca uses local llama.cpp inference (no remote API calls).
+      EOS
+    end
+
+    test do
+      assert_match version.to_s, shell_output("#{bin}/git-ca --version")
+    end
+  end
+EOF
+
+          # Commit and push changes
+          git add Formula/git-ca.rb
+          git commit -m "chore: update git-ca to v${VERSION}" || echo "No changes to commit"
+          git push
+
+      - name: Notify Success
+        run: |
+          echo "✅ Release created successfully!"
+          echo "✅ Homebrew formula updated!"
+          echo ""
+          echo "Users can now install with:"
+          echo "  brew tap zh30/tap"
+          echo "  brew install git-ca"

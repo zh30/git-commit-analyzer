@@ -33,11 +33,12 @@
    - **注意**：Linux 和 Windows 构建已禁用，如需启用请参考 `.github/workflows/build-binaries.yml`
 
 3. **更新 Homebrew**：
-   - `release.yml` 工作流自动：
-     - 下载所有平台的二进制包
-     - 计算 SHA256 校验和
-     - 更新 `git-ca.rb` 公式中的 bottle 校验和
-     - 推送到 `homebrew-tap` 仓库
+   - **完全自动化**：GitHub Actions 自动：
+     - 从 Release 下载校验和
+     - 计算 source tarball 校验和
+     - 更新 `git-ca.rb` 公式中的版本和 bottle 校验和
+     - 自动推送到 `homebrew-tap` 仓库
+   - 无需手动干预！
 
 4. **手动触发**（如需要）：
    ```bash

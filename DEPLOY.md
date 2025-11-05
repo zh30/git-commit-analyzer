@@ -40,7 +40,7 @@ git tag v1.1.2
 git push origin v1.1.2
 ```
 
-### GitHub Actions Workflows
+### GitHub Actions Workflow
 
 #### Build Binaries (`.github/workflows/build-binaries.yml`)
 
@@ -56,27 +56,18 @@ Triggered on:
 1. Checks out repository
 2. Installs Rust toolchain and platform-specific dependencies
 3. Builds release binary for target platform
-4. Strips binaries (macOS/Linux) to reduce size
-5. Creates compressed archives:
-   - `.tar.gz` for macOS/Linux
-   - `.zip` for Windows
-6. Uploads artifacts to GitHub Actions
-
-#### Release & Homebrew Update (`.github/workflows/release.yml`)
-
-Triggered on version tags only.
-
-**Process:**
-1. Creates GitHub Release with:
+4. Strips binaries to reduce size
+5. Creates compressed archives (`.tar.gz` for macOS)
+6. Creates GitHub Release with:
    - Auto-generated changelog from commit history
    - Download links for all platforms
    - Installation instructions
-2. Downloads all release assets
-3. Calculates SHA256 checksums for each platform
-4. Updates `git-ca.rb` Homebrew formula with:
-   - Version number
-   - Bottle checksums for all platforms
-5. Pushes updated formula to `homebrew-tap` repository
+7. Computes SHA256 checksums for all platforms
+8. Uploads artifacts and checksums to GitHub Release
+9. **Automatically updates Homebrew formula** with new version and bottle checksums
+10. Pushes updates to `homebrew-tap` repository
+
+**Fully Automated**: The entire release process is now automated, including Homebrew formula updates!
 
 ## 3. Manual Release (Alternative)
 
