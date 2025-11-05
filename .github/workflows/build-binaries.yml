@@ -214,6 +214,9 @@ jobs:
 
           cd homebrew-tap
 
+          # Create Formula directory if it doesn't exist
+          mkdir -p Formula
+
           # Create the updated formula using printf
           {
             echo "class GitCa < Formula"
