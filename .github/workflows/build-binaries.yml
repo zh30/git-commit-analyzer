@@ -214,49 +214,49 @@ jobs:
 
           cd homebrew-tap
 
-          # Create the updated formula
-          cat > Formula/git-ca.rb <<EOF
-  class GitCa < Formula
-    desc "AI-powered Git plugin for generating meaningful commit messages"
-    homepage "https://github.com/zh30/git-commit-analyzer"
-    url "https://github.com/zh30/git-commit-analyzer/archive/refs/tags/v${VERSION}.tar.gz"
-    sha256 "${TARBALL_SHA256}"
-    license "MIT"
-    head "https://github.com/zh30/git-commit-analyzer.git", branch: "main"
-
-    # Bottle support for pre-built binaries
-    bottle do
-      root_url "https://github.com/zh30/git-commit-analyzer/releases/download/v${VERSION}"
-      sha256 cellar: :any_skip_relocate, arm64_sequoia: "${ARM64_MACOS}"
-      sha256 cellar: :any_skip_relocate, x86_64_sequoia: "${X86_64_MACOS}"
-    end
-
-    def install
-      bin.install "git-ca"
-    end
-
-    def caveats
-      <<~EOS
-        To use git-ca, you need a local GGUF model (llama.cpp format).
-
-        The tool will automatically download the default model
-        (unsloth/gemma-3-270m-it-GGUF) on first run, or you can:
-          - Place GGUF files in ./models directory
-          - Place GGUF files in ~/.cache/git-ca/models directory
-          - Run 'git ca model' to select a model manually
-
-        To set up a default model, run:
-          git ca model
-
-        Note: git-ca uses local llama.cpp inference (no remote API calls).
-      EOS
-    end
-
-    test do
-      assert_match version.to_s, shell_output("#{bin}/git-ca --version")
-    end
-  end
-EOF
+          # Create the updated formula using printf
+          {
+            echo "class GitCa < Formula"
+            echo "  desc \"AI-powered Git plugin for generating meaningful commit messages\""
+            echo "  homepage \"https://github.com/zh30/git-commit-analyzer\""
+            echo "  url \"https://github.com/zh30/git-commit-analyzer/archive/refs/tags/v${VERSION}.tar.gz\""
+            echo "  sha256 \"${TARBALL_SHA256}\""
+            echo "  license \"MIT\""
+            echo "  head \"https://github.com/zh30/git-commit-analyzer.git\", branch: \"main\""
+            echo ""
+            echo "  # Bottle support for pre-built binaries"
+            echo "  bottle do"
+            echo "    root_url \"https://github.com/zh30/git-commit-analyzer/releases/download/v${VERSION}\""
+            echo "    sha256 cellar: :any_skip_relocate, arm64_sequoia: \"${ARM64_MACOS}\""
+            echo "    sha256 cellar: :any_skip_relocate, x86_64_sequoia: \"${X86_64_MACOS}\""
+            echo "  end"
+            echo ""
+            echo "  def install"
+            echo "    bin.install \"git-ca\""
+            echo "  end"
+            echo ""
+            echo "  def caveats"
+            echo "    <<~EOS"
+            echo "      To use git-ca, you need a local GGUF model (llama.cpp format)."
+            echo ""
+            echo "      The tool will automatically download the default model"
+            echo "      (unsloth/gemma-3-270m-it-GGUF) on first run, or you can:"
+            echo "        - Place GGUF files in ./models directory"
+            echo "        - Place GGUF files in ~/.cache/git-ca/models directory"
+            echo "        - Run 'git ca model' to select a model manually"
+            echo ""
+            echo "      To set up a default model, run:"
+            echo "        git ca model"
+            echo ""
+            echo "      Note: git-ca uses local llama.cpp inference (no remote API calls)."
+            echo "    EOS"
+            echo "  end"
+            echo ""
+            echo "  test do"
+            echo "    assert_match version.to_s, shell_output(\"#{bin}/git-ca --version\")"
+            echo "  end"
+            echo "end"
+          } > Formula/git-ca.rb
 
           # Commit and push changes
           git add Formula/git-ca.rb

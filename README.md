@@ -6,13 +6,12 @@ Git Commit Analyzer is a Rust-based Git plugin that generates Git Flow–style c
 
 ## Key Features
 
-- **Local inference**: Uses `llama_cpp_sys` to run GGUF models without any remote API.
+- **Local inference**: Uses `llama_cpp_sys_2` to run GGUF models without any remote API calls.
 - **Smart diff summarisation**: Large lockfiles and generated assets are reduced to concise summaries before prompting.
-- **Git Flow enforcement**: Ensures responses match `<type>(<scope>): <subject>` and retries/falls back when they do not.
+- **Git Flow enforcement**: Ensures responses match `<type>(<scope>): <subject>` and retries/falls back when they don't.
 - **Interactive CLI**: Review, edit, or cancel the generated commit message.
 - **Multi-language prompts**: English (default) and Simplified Chinese.
-- **Configurable context**: Tune llama context length via Git configuration.
-- **Multi-platform binaries**: Pre-built binaries for macOS (Intel & Apple Silicon).
+- **Multi-platform support**: Pre-built binaries for macOS (Intel & Apple Silicon).
 
 ## Requirements
 
@@ -31,11 +30,11 @@ brew install git-ca
 ```
 
 This installs a pre-built binary for your platform:
-- **macOS**: Apple Silicon (M1/M2/M3) and Intel (x86_64)
+- **macOS**: Apple Silicon (M1/M2/M3/M4) and Intel (x86_64)
 
-No Rust toolchain or compilation needed!
+**No Rust toolchain or compilation needed!** The binary is automatically downloaded from GitHub Releases.
 
-**Note**: Linux builds are temporarily disabled due to compilation issues. Windows builds are available via [GitHub Releases](https://github.com/zh30/git-commit-analyzer/releases).
+**Note**: Linux builds are temporarily disabled due to compilation issues. Windows builds are available via [GitHub Releases](https://github.com/zh30/git-commit-analyzer/releases) but not distributed via Homebrew.
 
 ### Manual Installation
 
@@ -43,18 +42,13 @@ Download the appropriate binary for your platform from [Releases](https://github
 
 ```bash
 # macOS (Apple Silicon)
-curl -L -o git-ca https://github.com/zh30/git-commit-analyzer/releases/download/v1.1.2/git-ca-1.1.2-apple-darwin-arm64.tar.gz
-tar -xzf git-ca-1.1.2-apple-darwin-arm64.tar.gz
-sudo mv git-ca /usr/local/bin/
-chmod +x /usr/local/bin/git-ca
-
-# macOS (Intel)
-curl -L -o git-ca https://github.com/zh30/git-commit-analyzer/releases/download/v1.1.2/git-ca-1.1.2-apple-darwin-x86_64.tar.gz
-tar -xzf git-ca-1.1.2-apple-darwin-x86_64.tar.gz
+curl -L -o git-ca.tar.gz https://github.com/zh30/git-commit-analyzer/releases/download/v1.1.2/git-ca-1.1.2-apple-darwin-arm64.tar.gz
+tar -xzf git-ca.tar.gz
 sudo mv git-ca /usr/local/bin/
 chmod +x /usr/local/bin/git-ca
 ```
-**Note**: Linux builds are temporarily disabled due to compilation issues. Windows builds are available via [GitHub Releases](https://github.com/zh30/git-commit-analyzer/releases).
+
+**Note**: Linux builds are temporarily disabled. Windows builds are available via [GitHub Releases](https://github.com/zh30/git-commit-analyzer/releases).
 
 ### Build from Source
 
@@ -64,10 +58,7 @@ If you prefer to build from source:
 git clone https://github.com/zh30/git-commit-analyzer.git
 cd git-commit-analyzer
 cargo build --release
-mkdir -p ~/.git-plugins
-cp target/release/git-ca ~/.git-plugins/
-echo 'export PATH="$HOME/.git-plugins:$PATH"' >> ~/.bashrc   # adapt for your shell
-source ~/.bashrc
+sudo cp target/release/git-ca /usr/local/bin/
 ```
 
 ### One-Line Bootstrap Script
@@ -82,7 +73,7 @@ On first run the CLI will:
 
 1. **Scan for models** in common directories:
    - `./models` (project directory)
-   - `~/.cache/git-ca/models` (Linux)
+   - `~/.cache/git-ca/models` (Linux/macOS)
    - `~/.local/share/git-ca/models` (Linux alt)
    - `~/Library/Application Support/git-ca/models` (macOS)
 
@@ -131,17 +122,26 @@ Key modules:
 
 ## Release Process
 
-Releases are automated via GitHub Actions:
+**Fully automated release via GitHub Actions:**
 
 1. Push a version tag: `git tag v1.1.2 && git push origin v1.1.2`
-2. GitHub Actions builds binaries for macOS only (2 platforms: Intel & Apple Silicon)
-3. Binaries are uploaded to GitHub Releases
-4. Homebrew formula is automatically updated with bottle checksums
-5. `homebrew-tap` repository receives the updated formula
-   - **Note**: Linux builds are temporarily disabled due to compilation issues
-   - Windows builds are available via GitHub Releases
+2. GitHub Actions automatically:
+   - Builds binaries for macOS (Intel & Apple Silicon)
+   - Creates GitHub Release with changelog
+   - Generates SHA256 checksums
+   - **Automatically updates Homebrew formula** with bottle checksums
+   - Pushes updates to `homebrew-tap` repository
+3. Users can immediately install with: `brew install git-ca`
+
+**Note**: Linux builds are temporarily disabled due to compilation issues. Windows builds are available via GitHub Releases but not distributed via Homebrew.
 
 See [DEPLOY.md](DEPLOY.md) for complete release documentation.
+
+## Supported Platforms
+
+- **macOS**: ✅ Apple Silicon (arm64) and Intel (x86_64) - Pre-built binaries via Homebrew
+- **Linux**: ❌ Temporarily disabled (compilation issues)
+- **Windows**: ⚠️ Available via GitHub Releases (not Homebrew)
 
 ## Contributing
 
