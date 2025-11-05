@@ -1,66 +1,156 @@
-# 发布 git-ca 到 Homebrew
+# Homebrew 发布指南
 
-本文档描述了如何将 git-ca 发布到 Homebrew 的步骤。
+本文档记录了将 `git-ca` 发布到 Homebrew tap 的完整流程，支持多平台预构建二进制包（bottles）。
 
-## 创建发布
+## 多平台预构建二进制包（推荐）
 
-1. 确保代码已经准备好发布，包括：
-   - 所有功能测试通过
-   - 版本号已更新 (在 Cargo.toml 中)
-   - CHANGELOG 已更新
+我们的 Homebrew formula 支持预构建的二进制包（bottles），用户无需从源码构建。
 
-2. 在 GitHub 上创建一个新的发布版本（Release）:
-   - 标签应该是 `v1.0.0` 格式
-   - 发布标题应该是 "git-ca v1.0.0"
-   - 在描述中包含此版本的更新内容
+### 支持的平台
+- **macOS**: Apple Silicon (arm64) 和 Intel (x86_64)
 
-3. 上传生成的 tar.gz 文件，或者让 GitHub 自动创建。
+### Linux 和 Windows 支持
+- **Linux**: 暂时禁用，由于编译问题
+- **Windows**: 平台的二进制包会通过 GitHub Releases 发布，但不在 Homebrew 中分发
 
-4. 计算发布压缩包的 SHA256 校验值：
+如需 Linux 或 Windows 版本，请直接从 [Releases](https://github.com/zh30/git-commit-analyzer/releases) 页面下载，或参考 `.github/workflows/build-binaries.yml` 启用构建。
+
+### 发布流程
+
+#### 自动发布（推荐）
+
+发布流程通过 GitHub Actions 自动化完成：
+
+1. **触发构建**：
+   - 推送版本标签 `v*.*.*` 到 `main` 分支
+   - GitHub Actions 会自动触发 `build-binaries.yml` 工作流
+
+2. **构建阶段**：
+   - 在 macOS 上构建二进制包：
+     - macOS 13 (x86_64)
+     - macOS 14 (ARM64)
+   - 构建完成后自动上传二进制包到 GitHub Release
+   - **注意**：Linux 和 Windows 构建已禁用，如需启用请参考 `.github/workflows/build-binaries.yml`
+
+3. **更新 Homebrew**：
+   - `release.yml` 工作流自动：
+     - 下载所有平台的二进制包
+     - 计算 SHA256 校验和
+     - 更新 `git-ca.rb` 公式中的 bottle 校验和
+     - 推送到 `homebrew-tap` 仓库
+
+4. **手动触发**（如需要）：
+   ```bash
+   # 更新版本号
+   vim Cargo.toml
+
+   # 提交并推送
+   git commit -m "chore: bump version"
+   git push origin main
+
+   # 创建并推送标签
+   git tag v1.1.2
+   git push origin v1.1.2
    ```
-   curl -L https://github.com/zh30/git-commit-analyzer/archive/refs/tags/v1.0.0.tar.gz | shasum -a 256
-   ```
 
-5. 复制得到的校验值，并更新 `git-ca.rb` 文件中的 `sha256` 值。
+#### 验证发布
 
-## 提交到 Homebrew
+在创建 PR 或推送标签前，验证 Homebrew 公式：
 
-### 选项 1: 提交到 Homebrew Core
-
-如果你想将 git-ca 作为官方的 Homebrew 包，请按照以下步骤操作：
-
-1. Fork [Homebrew Core 仓库](https://github.com/Homebrew/homebrew-core)
-2. 将更新后的 `git-ca.rb` 文件保存到 `Formula/g/git-ca.rb`
-3. 提交一个 Pull Request
-
-### 选项 2: 创建自己的 Tap
-
-如果你想通过自己的 Tap 分发，这是更简单的方法：
-
-1. 创建一个新的仓库，命名为 `homebrew-tap`
-2. 将 `git-ca.rb` 文件添加到这个仓库
-3. 用户可以通过以下命令安装：
-   ```
-   brew tap zh30/tap
-   brew install git-ca
-   ```
-
-## 更新现有公式
-
-当发布新版本时：
-
-1. 更新 `url` 指向新版本
-2. 更新 `sha256` 值
-3. 提交更新后的公式
-
-## 测试公式
-
-在提交前进行测试：
-
-```
+```bash
+# 本地验证
 brew install --build-from-source ./git-ca.rb
 brew test git-ca
-brew audit --strict git-ca
+brew audit --strict ./git-ca.rb
+
+# 验证 bottle 安装
+brew uninstall git-ca
+brew install zh30/tap/git-ca
+git ca --version
 ```
 
-确保所有测试都通过，然后才能提交到 Homebrew。 
+### Homebrew Formula 结构
+
+`git-ca.rb` 现在包含：
+
+```ruby
+class GitCa < Formula
+  # ... 元数据 ...
+
+  # Bottle 支持 - 预构建二进制包
+  bottle do
+    root_url "https://github.com/zh30/git-commit-analyzer/releases/download/v#{version}"
+    sha256 cellar: :any_skip_relocate, arm64_sequoia: "SHA256_ARM64_MACOS"
+    sha256 cellar: :any_skip_relocate, x86_64_sequoia: "SHA256_X86_64_MACOS"
+    # 注意：Linux 构建禁用，Windows 构建通过 GitHub Releases 提供，但不在 Homebrew 中分发
+  end
+
+  # 安装时直接使用预构建二进制
+  def install
+    bin.install "git-ca"
+  end
+end
+```
+
+### 用户安装
+
+用户现在可以通过以下方式安装：
+
+```bash
+# 添加 tap
+brew tap zh30/tap
+
+# 安装（自动使用 bottle，无须从源码构建）
+brew install git-ca
+
+# 验证安装
+git ca --version
+```
+
+## 故障排除
+
+### 常见问题
+
+1. **bottle 校验和不匹配**：
+   - 检查二进制包是否正确构建
+   - 重新计算 SHA256 校验和
+   - 确保所有平台都已构建
+
+2. **构建失败**：
+   - 检查 `.github/workflows/build-binaries.yml` 中的依赖安装
+   - 确认 Rust 工具链版本
+   - 查看 GitHub Actions 日志
+
+3. **Homebrew 安装慢**：
+   - 检查 bottle URL 是否可访问
+   - 确认 GitHub Release 已创建
+   - 验证 `git-ca.rb` 中的 `root_url`
+
+### 调试步骤
+
+```bash
+# 检查 bottle 是否可用
+brew fetch --bottle-tag=arm64_sequoia zh30/tap/git-ca
+
+# 强制从源码安装（用于调试）
+HOMEBREW_NO_INSTALL_FROM_API=1 brew install --build-from-source zh30/tap/git-ca
+
+# 查看详细安装日志
+brew install -v zh30/tap/git-ca
+```
+
+## 最佳实践
+
+1. **版本管理**：
+   - 始终在 `Cargo.toml` 和 `git-ca.rb` 中保持版本一致
+   - 使用语义化版本号 (semver)
+
+2. **测试**：
+   - 在不同平台上测试 bottle
+   - 运行完整的 CI/CD 流程
+   - 验证用户安装体验
+
+3. **文档**：
+   - 更新 README.md 中的安装说明
+   - 保持 HOMEBREW.md 和 DEPLOY.md 最新
+   - 记录所有依赖变更

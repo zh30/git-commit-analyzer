@@ -6,7 +6,7 @@ on:
       - 'v*.*.*'
 
 jobs:
-  create-release:
+  update-homebrew:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -20,58 +20,87 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Generate changelog
-        id: changelog
+      - name: Download release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -v ${{ github.ref_name }} | head -n 1)
-          if [ -z "$PREVIOUS_TAG" ]; then
-            CHANGELOG=$(git log --pretty=format:"* %s (%an)" ${{ github.ref_name }})
-          else
-            CHANGELOG=$(git log --pretty=format:"* %s (%an)" $PREVIOUS_TAG..${{ github.ref_name }})
-          fi
-          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Download all artifacts from the build-binaries workflow
+          gh api -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.name | contains("git-ca-")) | .archive_download_url' \
+            | xargs -I {} -n 1 bash -c 'curl -L -H "Authorization: token $GITHUB_TOKEN" {} -o artifacts/$(basename {})'
 
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        with:
-          name: git-ca ${{ github.ref_name }}
-          body: |
-            ## Changelog
-            ${{ steps.changelog.outputs.CHANGELOG }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
+          # Or download from release assets
+          gh release download ${{ github.ref_name }} --pattern 'git-ca-*' -D artifacts/
 
-      - name: Get SHA256
-        id: get_sha
+      - name: Display downloaded files
+        run: ls -la artifacts/
+
+      - name: Calculate checksums
         run: |
-          TARBALL_URL="https://github.com/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.tar.gz"
-          SHA256=$(curl -L $TARBALL_URL | shasum -a 256 | awk '{print $1}')
-          echo "SHA256=$SHA256" >> $GITHUB_OUTPUT
+          cd artifacts
+          for file in git-ca-*; do
+            echo "=== $file ==="
+            sha256sum "$file"
+          done > ../checksums.txt
+          cat ../checksums.txt
 
-      - name: Update Homebrew formula
+      - name: Extract checksums for each platform
+        id: extract_checksums
+        run: |
+          # Extract checksums for each platform
+          ARM64_MACOS=$(grep "apple-darwin-arm64" checksums.txt | awk '{print $1}')
+          X86_64_MACOS=$(grep "apple-darwin-x86_64" checksums.txt | awk '{print $1}')
+          # Linux builds disabled
+          ARM64_LINUX="DISABLED_LINUX"
+          X86_64_LINUX="DISABLED_LINUX"
+
+          echo "ARM64_MACOS=${ARM64_MACOS}" >> $GITHUB_OUTPUT
+          echo "X86_64_MACOS=${X86_64_MACOS}" >> $GITHUB_OUTPUT
+          echo "ARM64_LINUX=${ARM64_LINUX}" >> $GITHUB_OUTPUT
+          echo "X86_64_LINUX=${X86_64_LINUX}" >> $GITHUB_OUTPUT
+
+          echo "Checksums extracted:"
+          echo "  ARM64 macOS: ${ARM64_MACOS}"
+          echo "  x86_64 macOS: ${X86_64_MACOS}"
+          echo ""
+          echo "Note: Linux builds are disabled due to compilation issues"
+          echo "      Windows builds are available via GitHub Releases but not distributed via Homebrew"
+
+      - name: Update Homebrew formula with bottle checksums
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
-          SHA256=${{ steps.get_sha.outputs.SHA256 }}
-          sed -i "s|url \".*\"|url \"https://github.com/${{ github.repository }}/archive/refs/tags/v${VERSION}.tar.gz\"|" git-ca.rb
-          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" git-ca.rb
+
+          # Update version and root URL
+          sed -i.bak "s|url \"https://github.com/${{ github.repository }}/archive/refs/tags/v.*\.tar.gz\"|url \"https://github.com/${{ github.repository }}/archive/refs/tags/v${VERSION}.tar.gz\"|" git-ca.rb
+
+          # Update bottle checksums
+          sed -i.bak "s|sha256 cellar: :any_skip_relocate, arm64_sequoia: \".*\"|sha256 cellar: :any_skip_relocate, arm64_sequoia: \"${{ steps.extract_checksums.outputs.ARM64_MACOS }}\"|" git-ca.rb
+          sed -i.bak "s|sha256 cellar: :any_skip_relocate, x86_64_sequoia: \".*\"|sha256 cellar: :any_skip_relocate, x86_64_sequoia: \"${{ steps.extract_checksums.outputs.X86_64_MACOS }}\"|" git-ca.rb
+          sed -i.bak "s|sha256 cellar: :any_skip_relocate, arm64_linux: \".*\"|sha256 cellar: :any_skip_relocate, arm64_linux: \"${{ steps.extract_checksums.outputs.ARM64_LINUX }}\"|" git-ca.rb
+          sed -i.bak "s|sha256 cellar: :any_skip_relocate, x86_64_linux: \".*\"|sha256 cellar: :any_skip_relocate, x86_64_linux: \"${{ steps.extract_checksums.outputs.X86_64_LINUX }}\"|" git-ca.rb
+
+          # Update version number in formula
+          sed -i.bak "s|git-ca/archive/refs/tags/v.*\.tar.gz|git-ca/archive/refs/tags/v${VERSION}.tar.gz|" git-ca.rb
+
+          echo "Updated git-ca.rb:"
+          cat git-ca.rb
 
       - name: Update Homebrew Tap
+        env:
+          GITHUB_TOKEN: ${{ secrets.TARGET_REPO_PAT }}
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          
+
           # Clone the homebrew-tap repository
           git clone https://x-access-token:${{ secrets.TARGET_REPO_PAT }}@github.com/zh30/homebrew-tap.git
-          
+
           # Copy the updated formula to the tap repository
           cp git-ca.rb homebrew-tap/
-          
+
           # Commit and push the changes to the tap repository
           cd homebrew-tap
           git add git-ca.rb
-          git commit -m "chore: update git-ca to v${{ steps.get_version.outputs.VERSION }}"
+          git commit -m "chore: update git-ca to v${{ steps.get_version.outputs.VERSION }} with bottle checksums"
           git push

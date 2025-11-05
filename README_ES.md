@@ -1,165 +1,99 @@
-# Analizador de Commits Git
+# Analizador de commits Git
 
-[![Peerlist](https://github-readme-badge.peerlist.io/api/zhanghe)](https://peerlist.io/zhanghe)
+[English](README.md) · [中文](README_ZH.md) · [Français](README_FR.md)
 
-[English](README.md) | [中文](README_ZH.md) | [Français](README_FR.md)
-
-Analizador de Commits Git es un potente plugin de Git que utiliza IA para generar automáticamente mensajes de commit significativos basados en tus cambios preparados. Utiliza Ollama para analizar diferencias git y proponer mensajes de commit siguiendo el formato Git Flow.
+Git Commit Analyzer es un plugin de Git escrito en Rust que aprovecha un modelo local de llama.cpp para analizar el diff preparado y generar mensajes de commit con formato Git Flow. El CLI resume automáticamente los cambios voluminosos, valida el formato devuelto por el modelo y ofrece mensajes deterministas de respaldo si la inferencia falla.
 
 ## Características
 
-- Generación automática de mensajes de commit que cumplen con Git Flow
-- Funciona con Ollama para procesamiento de IA local
-- Modo interactivo que permite a los usuarios usar, editar o cancelar el mensaje de commit propuesto
-- Soporte multiidioma (Inglés y Chino Simplificado)
-- Compatibilidad multiplataforma (Linux, macOS, Windows)
-- Personalizable con tu firma Git personal
-- Soporte para selección y persistencia de modelos
+- **Inferencia local**: `llama_cpp_sys` ejecuta modelos GGUF sin depender de servicios remotos.
+- **Resumen inteligente del diff**: los lockfiles y artefactos grandes se reducen a resúmenes antes de llamar al modelo.
+- **Cumplimiento de Git Flow**: se comprueba `<type>(<scope>): <subject>`; si la respuesta no es válida, se reintenta o se devuelve un mensaje estándar.
+- **CLI interactivo**: el usuario puede aceptar, editar o cancelar el mensaje sugerido.
+- **Prompts multilingües**: inglés (predeterminado) y chino simplificado.
+- **Contexto configurable**: ajuste la ventana de contexto de llama mediante configuración de Git.
 
-## Requisitos previos
+## Requisitos
 
-- Git (versión 2.0 o posterior)
-- Ollama instalado y en ejecución (https://ollama.com/download)
-- Al menos un modelo de lenguaje instalado en Ollama
+- Git ≥ 2.30
+- Toolchain estable de Rust (`cargo`)
+- Dependencias de compilación para llama.cpp (cmake, compilador C/C++, controladores Metal/CUDA según plataforma)
+- Un modelo GGUF local (el programa puede descargar `unsloth/gemma-3-270m-it-GGUF` si no encuentra modelos)
 
 ## Instalación
 
-### 🚀 Instalación con Un Clic (Recomendada)
+### Instalación manual
 
-La forma más rápida de instalar Git Commit Analyzer con un solo comando:
+```bash
+git clone https://github.com/zh30/git-commit-analyzer.git
+cd git-commit-analyzer
+cargo build --release
+mkdir -p ~/.git-plugins
+cp target/release/git-ca ~/.git-plugins/
+echo 'export PATH="$HOME/.git-plugins:$PATH"' >> ~/.bashrc   # adapte la ruta a su shell
+source ~/.bashrc
+```
+
+En la primera ejecución el CLI busca modelos en `./models`, `~/Library/Application Support/git-ca/models` y `~/.cache/git-ca/models`. Si no encuentra ninguno, ofrece descargar el modelo predeterminado desde Hugging Face.
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap zh30/tap
+brew install git-ca
+```
+
+### Script de arranque
+
+Un script opcional (`install-git-ca.sh`) automatiza la comprobación de dependencias, la compilación y la actualización del PATH:
 
 ```bash
 bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
 ```
 
-Esto automáticamente:
-- Detectará tu sistema operativo
-- Instalará todas las dependencias (Git, Rust, Ollama)
-- Construirá e instalará el plugin
-- Configurará tu entorno
-- Configurará Git
+Revise el script antes de ejecutarlo y asegúrese de que dispone de un modelo GGUF accesible.
 
-### Homebrew (macOS y Linux)
+## Uso
 
-Alternativamente, puedes instalar a través de Homebrew:
-
-```
-brew tap zh30/tap
-brew install git-ca
+```bash
+git add <archivos>
+git ca
 ```
 
-Después de la instalación, puede usar inmediatamente el comando `git ca`.
+Durante la primera ejecución se le pedirá seleccionar la ruta del modelo. En cada invocación:
 
-### Instalación manual (Linux y macOS)
+1. El diff preparado se resume (los archivos grandes solo muestran un resumen).
+2. El modelo llama.cpp genera el mensaje de commit.
+3. Si el resultado no cumple Git Flow, se lanza un segundo intento más estricto; si todavía falla, se ofrece un mensaje de respaldo (por ejemplo `chore(deps): update dependencies`).
+4. El usuario decide **usar**, **editar** o **cancelar** el mensaje.
 
-1. Clonar el repositorio:
-   ```
-   git clone https://github.com/zh30/git-commit-analyzer.git
-   cd git-commit-analyzer
-   ```
+### Configuración
 
-2. Construir el proyecto:
-   ```
-   cargo build --release
-   ```
+- `git ca model` — selector interactivo de modelos; la ruta GGUF elegida se reutiliza en ejecuciones futuras.
+- En ejecuciones no interactivas se reutiliza el modelo guardado o, si no existe, el primer GGUF detectado.
+- `git ca language` — alterna entre prompts en inglés y chino; guarda la preferencia en `commit-analyzer.language`.
+- La longitud de contexto de llama queda fijada en 1024 tokens.
 
-3. Crear un directorio para los plugins de Git (si no existe):
-   ```
-   mkdir -p ~/.git-plugins
-   ```
+## Desarrollo
 
-4. Copiar el binario compilado al directorio de plugins:
-   ```
-   cp target/release/git-ca ~/.git-plugins/
-   ```
-
-5. Añadir el directorio de plugins a su PATH. Añada la siguiente línea a su `~/.bashrc`, `~/.bash_profile`, o `~/.zshrc` (dependiendo de su shell):
-   ```
-   export PATH="$HOME/.git-plugins:$PATH"
-   ```
-
-6. Recargar la configuración de su shell:
-   ```
-   source ~/.bashrc  # o ~/.bash_profile, o ~/.zshrc
-   ```
-
-### Windows - teóricamente posible
-
-1. Clonar el repositorio:
-   ```
-   git clone https://github.com/zh30/git-commit-analyzer.git
-   cd git-commit-analyzer
-   ```
-
-2. Construir el proyecto:
-   ```
-   cargo build --release
-   ```
-
-3. Crear un directorio para los plugins de Git (si no existe):
-   ```
-   mkdir %USERPROFILE%\.git-plugins
-   ```
-
-4. Copiar el binario compilado al directorio de plugins:
-   ```
-   copy target\release\git-commit-analyzer.exe %USERPROFILE%\.git-plugins\
-   ```
-
-5. Añadir el directorio de plugins a su PATH:
-   - Haga clic derecho en 'Este PC' o 'Mi PC' y seleccione 'Propiedades'
-   - Haga clic en 'Configuración avanzada del sistema'
-   - Haga clic en 'Variables de entorno'
-   - En 'Variables del sistema', busque y seleccione 'Path', luego haga clic en 'Editar'
-   - Haga clic en 'Nuevo' y añada `%USERPROFILE%\.git-plugins`
-   - Haga clic en 'Aceptar' para cerrar todos los cuadros de diálogo
-
-6. Reinicie cualquier símbolo del sistema abierto para que los cambios surtan efecto.
-
-## Cómo usar
-
-Después de la instalación, puede utilizar Git Commit Analyzer en cualquier repositorio Git:
-
-1. Prepare sus cambios en su repositorio Git (utilizando el comando `git add`).
-2. Ejecute el siguiente comando:
-
-   ```
-   git ca
-   ```
-
-3. Si es la primera vez que ejecuta el comando, se le pedirá que seleccione un modelo de sus modelos Ollama instalados.
-4. El programa analizará sus cambios preparados y generará un mensaje de commit sugerido.
-5. Puede elegir usar el mensaje sugerido, editarlo o cancelar el commit.
-
-### Comandos de Configuración
-
-Para cambiar el modelo predeterminado en cualquier momento, ejecute:
-
-```
-git ca model
+```bash
+cargo fmt
+cargo clippy -- -D warnings
+cargo test
+cargo run -- git ca
 ```
 
-Para establecer el idioma de salida para los mensajes de commit generados por IA, ejecute:
-
-```
-git ca language
-```
-
-Idiomas disponibles:
-- Inglés (predeterminado)
-- Chino Simplificado (简体中文)
-
-El idioma seleccionado determinará el idioma del mensaje de commit generado por el modelo de IA. Nota: esto afecta el idioma del prompt de la IA, no el idioma de la interfaz.
+Archivos principales:
+- `src/main.rs`: flujo del CLI, resumen del diff, generación de mensajes de respaldo.
+- `src/llama.rs`: envoltorio minimalista sobre la sesión de llama.cpp.
 
 ## Contribución
 
-¡Las contribuciones son bienvenidas! No dude en enviar una Pull Request.
+Se aceptan Pull Requests. Incluya:
+- resultados de `cargo fmt`, `cargo clippy -- -D warnings` y `cargo test`,
+- actualizaciones de documentación (`README*.md`, `AGENTS.md`, `DEPLOY.md`) cuando cambie el comportamiento,
+- una breve nota sobre la verificación manual de `git ca` si aplica.
 
 ## Licencia
 
-Este proyecto está licenciado bajo la Licencia MIT - consulte el archivo [LICENSE](LICENSE) para más detalles.
-
-## Agradecimientos
-
-- A la comunidad de Rust por proporcionar excelentes bibliotecas y herramientas
-- A Ollama por proporcionar soporte para modelos de IA locales 
+Proyecto con licencia MIT. Consulte el archivo [LICENSE](LICENSE) para más información.

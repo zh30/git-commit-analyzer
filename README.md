@@ -1,165 +1,160 @@
 # Git Commit Analyzer
 
-[![Peerlist](https://github-readme-badge.peerlist.io/api/zhanghe)](https://peerlist.io/zhanghe)
+[中文](README_ZH.md) · [Français](README_FR.md) · [Español](README_ES.md)
 
-[中文](README_ZH.md) | [Français](README_FR.md) | [Español](README_ES.md)
+Git Commit Analyzer is a Rust-based Git plugin that generates Git Flow–style commit messages from your staged diff using a local llama.cpp model. The CLI summarises large diffs, validates model output, and falls back to deterministic messages when needed.
 
-Git Commit Analyzer is a powerful Git plugin that leverages AI to automatically generate meaningful commit messages based on your staged changes. It uses Ollama to analyze git diffs and propose commit messages following the Git Flow format.
+## Key Features
 
-## Features
+- **Local inference**: Uses `llama_cpp_sys` to run GGUF models without any remote API.
+- **Smart diff summarisation**: Large lockfiles and generated assets are reduced to concise summaries before prompting.
+- **Git Flow enforcement**: Ensures responses match `<type>(<scope>): <subject>` and retries/falls back when they do not.
+- **Interactive CLI**: Review, edit, or cancel the generated commit message.
+- **Multi-language prompts**: English (default) and Simplified Chinese.
+- **Configurable context**: Tune llama context length via Git configuration.
+- **Multi-platform binaries**: Pre-built binaries for macOS (Intel & Apple Silicon).
 
-- Automatic generation of Git Flow compliant commit messages
-- Powered by Ollama for local AI processing
-- Interactive mode allowing users to use, edit, or cancel the proposed commit message
-- Multi-language support (English and Simplified Chinese)
-- Cross-platform compatibility (Linux, macOS, Windows)
-- Customizable with your personal Git signature
-- Support for model selection and persistence
+## Requirements
 
-## Prerequisites
-
-- Git (version 2.0 or later)
-- Ollama installed and running (https://ollama.com/download)
-- At least one language model installed in Ollama
+- Git 2.30+
+- A local GGUF model (the CLI can download the default `unsloth/gemma-3-270m-it-GGUF`)
 
 ## Installation
 
-### 🚀 One-Click Installation (Recommended)
+### Homebrew (Recommended) - Fast Binary Installation
 
-The fastest way to install Git Commit Analyzer with a single command:
+**macOS users can install via Homebrew with pre-built binaries (no Rust compilation required):**
+
+```bash
+brew tap zh30/tap
+brew install git-ca
+```
+
+This installs a pre-built binary for your platform:
+- **macOS**: Apple Silicon (M1/M2/M3) and Intel (x86_64)
+
+No Rust toolchain or compilation needed!
+
+**Note**: Linux builds are temporarily disabled due to compilation issues. Windows builds are available via [GitHub Releases](https://github.com/zh30/git-commit-analyzer/releases).
+
+### Manual Installation
+
+Download the appropriate binary for your platform from [Releases](https://github.com/zh30/git-commit-analyzer/releases):
+
+```bash
+# macOS (Apple Silicon)
+curl -L -o git-ca https://github.com/zh30/git-commit-analyzer/releases/download/v1.1.2/git-ca-1.1.2-apple-darwin-arm64.tar.gz
+tar -xzf git-ca-1.1.2-apple-darwin-arm64.tar.gz
+sudo mv git-ca /usr/local/bin/
+chmod +x /usr/local/bin/git-ca
+
+# macOS (Intel)
+curl -L -o git-ca https://github.com/zh30/git-commit-analyzer/releases/download/v1.1.2/git-ca-1.1.2-apple-darwin-x86_64.tar.gz
+tar -xzf git-ca-1.1.2-apple-darwin-x86_64.tar.gz
+sudo mv git-ca /usr/local/bin/
+chmod +x /usr/local/bin/git-ca
+```
+**Note**: Linux builds are temporarily disabled due to compilation issues. Windows builds are available via [GitHub Releases](https://github.com/zh30/git-commit-analyzer/releases).
+
+### Build from Source
+
+If you prefer to build from source:
+
+```bash
+git clone https://github.com/zh30/git-commit-analyzer.git
+cd git-commit-analyzer
+cargo build --release
+mkdir -p ~/.git-plugins
+cp target/release/git-ca ~/.git-plugins/
+echo 'export PATH="$HOME/.git-plugins:$PATH"' >> ~/.bashrc   # adapt for your shell
+source ~/.bashrc
+```
+
+### One-Line Bootstrap Script
 
 ```bash
 bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
 ```
 
-This will automatically:
-- Detect your operating system
-- Install all dependencies (Git, Rust, Ollama)
-- Build and install the plugin
-- Configure your environment
-- Set up Git configuration
+## First-Time Setup
 
-### Homebrew (macOS and Linux)
+On first run the CLI will:
 
-Alternatively, you can install via Homebrew:
+1. **Scan for models** in common directories:
+   - `./models` (project directory)
+   - `~/.cache/git-ca/models` (Linux)
+   - `~/.local/share/git-ca/models` (Linux alt)
+   - `~/Library/Application Support/git-ca/models` (macOS)
 
+2. **Download default model** automatically if none found:
+   - Downloads `unsloth/gemma-3-270m-it-GGUF` from Hugging Face
+   - Stores it in `~/.cache/git-ca/models/`
+
+3. **Prompt for confirmation** if multiple models are found:
+   ```bash
+   git ca model  # Interactive model selector
+   ```
+
+## Usage
+
+```bash
+git add <files>
+git ca
 ```
-brew tap zh30/tap
-brew install git-ca
-```
 
-After installation, you can immediately use the `git ca` command.
+For each invocation:
 
-### Manual Installation (Linux and macOS)
-
-1. Clone the repository:
-   ```
-   git clone https://github.com/zh30/git-commit-analyzer.git
-   cd git-commit-analyzer
-   ```
-
-2. Build the project:
-   ```
-   cargo build --release
-   ```
-
-3. Create a directory for Git plugins (if it doesn't exist):
-   ```
-   mkdir -p ~/.git-plugins
-   ```
-
-4. Copy the compiled binary to the plugins directory:
-   ```
-   cp target/release/git-ca ~/.git-plugins/
-   ```
-
-5. Add the plugins directory to your PATH. Add the following line to your `~/.bashrc`, `~/.bash_profile`, or `~/.zshrc` (depending on your shell):
-   ```
-   export PATH="$HOME/.git-plugins:$PATH"
-   ```
-
-6. Reload your shell configuration:
-   ```
-   source ~/.bashrc  # or ~/.bash_profile, or ~/.zshrc
-   ```
-
-### Windows - theoretically possible 
-
-1. Clone the repository:
-   ```
-   git clone https://github.com/zh30/git-commit-analyzer.git
-   cd git-commit-analyzer
-   ```
-
-2. Build the project:
-   ```
-   cargo build --release
-   ```
-
-3. Create a directory for Git plugins (if it doesn't exist):
-   ```
-   mkdir %USERPROFILE%\.git-plugins
-   ```
-
-4. Copy the compiled binary to the plugins directory:
-   ```
-   copy target\release\git-commit-analyzer.exe %USERPROFILE%\.git-plugins\
-   ```
-
-5. Add the plugins directory to your PATH:
-   - Right-click on 'This PC' or 'My Computer' and select 'Properties'
-   - Click on 'Advanced system settings'
-   - Click on 'Environment Variables'
-   - Under 'System variables', find and select 'Path', then click 'Edit'
-   - Click 'New' and add `%USERPROFILE%\.git-plugins`
-   - Click 'OK' to close all dialogs
-
-6. Restart any open command prompts for the changes to take effect.
-
-## How to Use
-
-After installation, you can use Git Commit Analyzer in any Git repository:
-
-1. Stage your changes in your Git repository (using the `git add` command).
-2. Run the following command:
-
-   ```
-   git ca
-   ```
-
-3. If it's your first time running the command, you'll be prompted to select a model from your installed Ollama models.
-4. The program will analyze your staged changes and generate a suggested commit message.
-5. You can choose to use the suggested message, edit it, or cancel the commit.
+1. The staged diff is summarised (lockfiles and large assets are listed but not inlined).
+2. The llama.cpp model generates a commit message.
+3. Invalid output triggers a stricter retry; if still invalid, a deterministic fallback is offered.
+4. Choose to **use**, **edit**, or **cancel** the message.
 
 ### Configuration Commands
 
-To change the default model at any time, run:
+- `git ca model` — Interactive model selector
+- `git ca language` — Choose English or Simplified Chinese prompts
+- `git ca doctor` — Test model loading and inference
+- `git ca --version` — Display version information
 
+## Development
+
+```bash
+cargo fmt
+cargo clippy -- -D warnings
+cargo test
+cargo run -- git ca      # try against staged changes
 ```
-git ca model
-```
 
-To set the output language for AI-generated commit messages, run:
+Key modules:
+- `src/main.rs` — CLI orchestration, diff summariser, fallback generator.
+- `src/llama.rs` — llama.cpp session management.
 
-```
-git ca language
-```
+## Release Process
 
-Available languages:
-- English (default)
-- Simplified Chinese (简体中文)
+Releases are automated via GitHub Actions:
 
-The selected language will determine the language of the commit message generated by the AI model. Note that this affects the AI's prompt language, not the interface language.
+1. Push a version tag: `git tag v1.1.2 && git push origin v1.1.2`
+2. GitHub Actions builds binaries for macOS only (2 platforms: Intel & Apple Silicon)
+3. Binaries are uploaded to GitHub Releases
+4. Homebrew formula is automatically updated with bottle checksums
+5. `homebrew-tap` repository receives the updated formula
+   - **Note**: Linux builds are temporarily disabled due to compilation issues
+   - Windows builds are available via GitHub Releases
+
+See [DEPLOY.md](DEPLOY.md) for complete release documentation.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Pull requests are welcome. Please include:
+- `cargo fmt` / `cargo clippy -- -D warnings` / `cargo test` outputs,
+- Updates to documentation (`README*.md`, `AGENTS.md`, `DEPLOY.md`) when behaviour changes,
+- A short description of manual `git ca` verification if applicable.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Released under the MIT License. See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
 - The Rust community for providing excellent libraries and tools
-- Ollama for providing local AI model support
+- llama.cpp team for the efficient local inference engine
