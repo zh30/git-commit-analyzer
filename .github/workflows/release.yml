@@ -64,6 +64,8 @@ jobs:
           echo "  x86_64 macOS: ${X86_64_MACOS}"
           echo "  ARM64 Linux: ${ARM64_LINUX}"
           echo "  x86_64 Linux: ${X86_64_LINUX}"
+          echo ""
+          echo "Note: Windows builds are available via GitHub Releases but not distributed via Homebrew"
 
       - name: Update Homebrew formula with bottle checksums
         run: |

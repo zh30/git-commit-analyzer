@@ -34,15 +34,15 @@ jobs:
             os: ubuntu-22.04
             arch: arm64
             suffix: unknown-linux-gnu-arm64
-          # Windows
-          - target: x86_64-pc-windows-msvc
-            os: windows-2022
-            arch: x86_64
-            suffix: pc-windows-msvc-x86_64
-          - target: aarch64-pc-windows-msvc
-            os: windows-2022
-            arch: arm64
-            suffix: pc-windows-msvc-arm64
+          # Windows (Disabled - Uncomment if needed)
+          # - target: x86_64-pc-windows-msvc
+          #   os: windows-2022
+          #   arch: x86_64
+          #   suffix: pc-windows-msvc-x86_64
+          # - target: aarch64-pc-windows-msvc
+          #   os: windows-2022
+          #   arch: arm64
+          #   suffix: pc-windows-msvc-arm64
 
     steps:
       - name: Checkout repository
@@ -166,12 +166,6 @@ jobs:
             ### Linux (ARM64)
             - [git-ca-${{ steps.get_version.outputs.VERSION }}-unknown-linux-gnu-arm64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}-unknown-linux-gnu-arm64.tar.gz)
 
-            ### Windows (x86_64)
-            - [git-ca-${{ steps.get_version.outputs.VERSION }}-pc-windows-msvc-x86_64.zip](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}-pc-windows-msvc-x86_64.zip)
-
-            ### Windows (ARM64)
-            - [git-ca-${{ steps.get_version.outputs.VERSION }}-pc-windows-msvc-arm64.zip](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}-pc-windows-msvc-arm64.zip)
-
             ## Installation
 
             ### Using Homebrew (Recommended)
@@ -186,9 +180,6 @@ jobs:
             # macOS/Linux
             tar -xzf git-ca-VERSION-PLATFORM.tar.gz
             sudo mv git-ca /usr/local/bin/
-
-            # Windows
-            # Extract the zip file and add to PATH
             ```
           draft: false
           prerelease: false

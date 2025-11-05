@@ -12,7 +12,7 @@ Git Commit Analyzer is a Rust-based Git plugin that generates Git Flow–style c
 - **Interactive CLI**: Review, edit, or cancel the generated commit message.
 - **Multi-language prompts**: English (default) and Simplified Chinese.
 - **Configurable context**: Tune llama context length via Git configuration.
-- **Multi-platform binaries**: Pre-built binaries for macOS (Intel & Apple Silicon), Linux, and Windows.
+- **Multi-platform binaries**: Pre-built binaries for macOS (Intel & Apple Silicon) and Linux.
 
 ## Requirements
 
@@ -64,10 +64,8 @@ curl -L -o git-ca https://github.com/zh30/git-commit-analyzer/releases/download/
 tar -xzf git-ca-1.1.2-unknown-linux-gnu-arm64.tar.gz
 sudo mv git-ca /usr/local/bin/
 chmod +x /usr/local/bin/git-ca
-
-# Windows (PowerShell)
-# Download from Releases page and add to PATH
 ```
+**Note**: Windows builds are available via [GitHub Releases](https://github.com/zh30/git-commit-analyzer/releases) but not distributed via Homebrew.
 
 ### Build from Source
 
@@ -147,10 +145,11 @@ Key modules:
 Releases are automated via GitHub Actions:
 
 1. Push a version tag: `git tag v1.1.2 && git push origin v1.1.2`
-2. GitHub Actions builds binaries for all platforms (macOS, Linux, Windows)
+2. GitHub Actions builds binaries for macOS and Linux (4 platforms total)
 3. Binaries are uploaded to GitHub Releases
 4. Homebrew formula is automatically updated with bottle checksums
 5. `homebrew-tap` repository receives the updated formula
+   - **Note**: Windows builds are generated but only distributed via GitHub Releases
 
 See [DEPLOY.md](DEPLOY.md) for complete release documentation.
 
