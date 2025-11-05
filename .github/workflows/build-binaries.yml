@@ -117,6 +117,29 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R artifacts/
 
+      - name: Create Homebrew bottles
+        run: |
+          mkdir -p bottles
+          cd artifacts
+          # Rename files from git-ca-VERSION-PLATFORM.tar.gz to git-ca-VERSION.PLATFORM.bottle.tar.gz
+          for file in git-ca-*.tar.gz; do
+            if [ -f "$file" ]; then
+              # Extract version and platform from filename
+              filename=$(basename "$file" .tar.gz)
+              version="${filename#git-ca-}"
+              platform="${version#*-}"
+              version="${version%-${platform}}"
+
+              # Create bottle filename with dot separator
+              bottle_name="git-ca-${version}.${platform}.bottle.tar.gz"
+
+              # Copy and rename
+              cp "$file" "../bottles/${bottle_name}"
+              echo "Created: ${bottle_name}"
+            fi
+          done
+          ls -la bottles/
+
       - name: Get version from tag
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
@@ -156,11 +179,16 @@ jobs:
 
             ## Downloads
 
-            ### macOS (Apple Silicon)
-            - [git-ca-${{ steps.get_version.outputs.VERSION }}-apple-darwin-arm64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}-apple-darwin-arm64.tar.gz)
+            ### Homebrew Bottles (Recommended)
+            Install directly with: `brew install git-ca` (after `brew tap zh30/tap`)
 
-            ### macOS (Intel)
-            - [git-ca-${{ steps.get_version.outputs.VERSION }}-apple-darwin-x86_64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}-apple-darwin-x86_64.tar.gz)
+            ### Manual Download
+
+            **macOS (Apple Silicon)**
+            - [git-ca-${{ steps.get_version.outputs.VERSION }}.arm64_sequoia.bottle.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}.arm64_sequoia.bottle.tar.gz)
+
+            **macOS (Intel)**
+            - [git-ca-${{ steps.get_version.outputs.VERSION }}.x86_64_sequoia.bottle.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}.x86_sequoia.bottle.tar.gz)
 
             ## Installation
 
@@ -181,12 +209,8 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            artifacts/*/git-ca-*
-
-      - name: Upload checksums
-        uses: softprops/action-gh-release@v1
-        with:
-          files: checksums/checksums.txt
+            bottles/*.bottle.tar.gz
+            checksums/checksums.txt
 
       - name: Update Homebrew Formula
         env:
