@@ -374,7 +374,7 @@ dependencies = [
 
 [[package]]
 name = "git-ca"
-version = "2.0.7"
+version = "2.0.8"
 dependencies = [
  "git2",
  "hf-hub",

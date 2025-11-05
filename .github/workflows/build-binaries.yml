@@ -138,6 +138,7 @@ jobs:
               echo "Created: ${bottle_name}"
             fi
           done
+          cd ..
           ls -la bottles/
 
       - name: Get version from tag
