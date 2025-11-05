@@ -45,8 +45,7 @@ git push origin v1.1.2
 #### Build Binaries (`.github/workflows/build-binaries.yml`)
 
 Triggered on:
-- Push to `main` branch (for testing)
-- Push of version tags `v*.*.*` (for release)
+- Push of version tags `v*.*.*` to any branch (typically main)
 
 **Build Matrix:**
 - macOS 13 (Intel x86_64)
