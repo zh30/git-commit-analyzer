@@ -12,17 +12,66 @@ Git Commit Analyzer is a Rust-based Git plugin that generates Git Flow–style c
 - **Interactive CLI**: Review, edit, or cancel the generated commit message.
 - **Multi-language prompts**: English (default) and Simplified Chinese.
 - **Configurable context**: Tune llama context length via Git configuration.
+- **Multi-platform binaries**: Pre-built binaries for macOS (Intel & Apple Silicon), Linux, and Windows.
 
 ## Requirements
 
 - Git 2.30+
-- Rust toolchain (stable) with `cargo`
-- Build prerequisites for llama.cpp (`cmake`, C/C++ compiler, Metal/CUDA drivers as appropriate)
 - A local GGUF model (the CLI can download the default `unsloth/gemma-3-270m-it-GGUF`)
 
 ## Installation
 
-### Manual Install
+### Homebrew (Recommended) - Fast Binary Installation
+
+**macOS and Linux users can install via Homebrew with pre-built binaries (no Rust compilation required):**
+
+```bash
+brew tap zh30/tap
+brew install git-ca
+```
+
+This installs a pre-built binary for your platform:
+- **macOS**: Apple Silicon (M1/M2/M3) and Intel (x86_64)
+- **Linux**: x86_64 and ARM64
+
+No Rust toolchain or compilation needed!
+
+### Manual Installation
+
+Download the appropriate binary for your platform from [Releases](https://github.com/zh30/git-commit-analyzer/releases):
+
+```bash
+# macOS (Apple Silicon)
+curl -L -o git-ca https://github.com/zh30/git-commit-analyzer/releases/download/v1.1.2/git-ca-1.1.2-apple-darwin-arm64.tar.gz
+tar -xzf git-ca-1.1.2-apple-darwin-arm64.tar.gz
+sudo mv git-ca /usr/local/bin/
+chmod +x /usr/local/bin/git-ca
+
+# macOS (Intel)
+curl -L -o git-ca https://github.com/zh30/git-commit-analyzer/releases/download/v1.1.2/git-ca-1.1.2-apple-darwin-x86_64.tar.gz
+tar -xzf git-ca-1.1.2-apple-darwin-x86_64.tar.gz
+sudo mv git-ca /usr/local/bin/
+chmod +x /usr/local/bin/git-ca
+
+# Linux (x86_64)
+curl -L -o git-ca https://github.com/zh30/git-commit-analyzer/releases/download/v1.1.2/git-ca-1.1.2-unknown-linux-gnu-x86_64.tar.gz
+tar -xzf git-ca-1.1.2-unknown-linux-gnu-x86_64.tar.gz
+sudo mv git-ca /usr/local/bin/
+chmod +x /usr/local/bin/git-ca
+
+# Linux (ARM64)
+curl -L -o git-ca https://github.com/zh30/git-commit-analyzer/releases/download/v1.1.2/git-ca-1.1.2-unknown-linux-gnu-arm64.tar.gz
+tar -xzf git-ca-1.1.2-unknown-linux-gnu-arm64.tar.gz
+sudo mv git-ca /usr/local/bin/
+chmod +x /usr/local/bin/git-ca
+
+# Windows (PowerShell)
+# Download from Releases page and add to PATH
+```
+
+### Build from Source
+
+If you prefer to build from source:
 
 ```bash
 git clone https://github.com/zh30/git-commit-analyzer.git
@@ -34,24 +83,30 @@ echo 'export PATH="$HOME/.git-plugins:$PATH"' >> ~/.bashrc   # adapt for your sh
 source ~/.bashrc
 ```
 
-On first run the CLI scans common model directories (`./models`, `~/Library/Application Support/git-ca/models`, `~/.cache/git-ca/models`) and can download the default model via Hugging Face if none are found.
-
-### Homebrew Tap (macOS/Linux)
-
-```bash
-brew tap zh30/tap
-brew install git-ca
-```
-
 ### One-Line Bootstrap Script
-
-An optional helper script (`install-git-ca.sh`) automates dependency checks, compilation, and PATH updates:
 
 ```bash
 bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
 ```
 
-Review the script before execution and ensure a GGUF model is available (or allow the automated download).
+## First-Time Setup
+
+On first run the CLI will:
+
+1. **Scan for models** in common directories:
+   - `./models` (project directory)
+   - `~/.cache/git-ca/models` (Linux)
+   - `~/.local/share/git-ca/models` (Linux alt)
+   - `~/Library/Application Support/git-ca/models` (macOS)
+
+2. **Download default model** automatically if none found:
+   - Downloads `unsloth/gemma-3-270m-it-GGUF` from Hugging Face
+   - Stores it in `~/.cache/git-ca/models/`
+
+3. **Prompt for confirmation** if multiple models are found:
+   ```bash
+   git ca model  # Interactive model selector
+   ```
 
 ## Usage
 
@@ -60,19 +115,19 @@ git add <files>
 git ca
 ```
 
-During the first run you will be asked to choose a model path. For each invocation:
+For each invocation:
 
 1. The staged diff is summarised (lockfiles and large assets are listed but not inlined).
 2. The llama.cpp model generates a commit message.
-3. Invalid output triggers a stricter retry; if still invalid, a deterministic fallback (e.g., `chore(deps): update dependencies`) is offered.
+3. Invalid output triggers a stricter retry; if still invalid, a deterministic fallback is offered.
 4. Choose to **use**, **edit**, or **cancel** the message.
 
-### Configuration
+### Configuration Commands
 
-- `git ca model` — interactive model selector; the chosen GGUF path is reused on future runs.
-- Non-interactive runs reuse the persisted model or fall back to the first detected GGUF.
-- `git ca language` — choose English or Simplified Chinese prompts; stored in `commit-analyzer.language`.
-- Llama context length is fixed to 1024 tokens.
+- `git ca model` — Interactive model selector
+- `git ca language` — Choose English or Simplified Chinese prompts
+- `git ca doctor` — Test model loading and inference
+- `git ca --version` — Display version information
 
 ## Development
 
@@ -85,7 +140,19 @@ cargo run -- git ca      # try against staged changes
 
 Key modules:
 - `src/main.rs` — CLI orchestration, diff summariser, fallback generator.
-- `src/llama.rs` — thin wrapper around llama.cpp session management.
+- `src/llama.rs` — llama.cpp session management.
+
+## Release Process
+
+Releases are automated via GitHub Actions:
+
+1. Push a version tag: `git tag v1.1.2 && git push origin v1.1.2`
+2. GitHub Actions builds binaries for all platforms (macOS, Linux, Windows)
+3. Binaries are uploaded to GitHub Releases
+4. Homebrew formula is automatically updated with bottle checksums
+5. `homebrew-tap` repository receives the updated formula
+
+See [DEPLOY.md](DEPLOY.md) for complete release documentation.
 
 ## Contributing
 
@@ -101,4 +168,4 @@ Released under the MIT License. See [LICENSE](LICENSE) for details.
 ## Acknowledgments
 
 - The Rust community for providing excellent libraries and tools
-- Ollama for providing local AI model support
+- llama.cpp team for the efficient local inference engine

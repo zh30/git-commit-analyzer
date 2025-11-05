@@ -1,60 +1,153 @@
 # Homebrew 发布指南
 
-本文档记录了将 `git-ca` 发布到 Homebrew tap 或 Homebrew Core 的流程。
+本文档记录了将 `git-ca` 发布到 Homebrew tap 的完整流程，支持多平台预构建二进制包（bottles）。
 
-## 1. 生成发布包
+## 多平台预构建二进制包（推荐）
 
-1. bump 版本号：更新 `Cargo.toml` 与 `Cargo.lock`。
-2. 运行 `cargo fmt && cargo clippy -- -D warnings && cargo test`。
-3. 构建发布包并获取校验值：
+我们的 Homebrew formula 支持预构建的二进制包（bottles），用户无需从源码构建。
+
+### 支持的平台
+- **macOS**: Apple Silicon (arm64) 和 Intel (x86_64)
+- **Linux**: x86_64 和 ARM64
+
+### 发布流程
+
+#### 自动发布（推荐）
+
+发布流程通过 GitHub Actions 自动化完成：
+
+1. **触发构建**：
+   - 推送版本标签 `v*.*.*` 到 `main` 分支
+   - GitHub Actions 会自动触发 `build-binaries.yml` 工作流
+
+2. **构建阶段**：
+   - 在多个平台上并行构建二进制包：
+     - macOS 13 (x86_64)
+     - macOS 14 (ARM64)
+     - Ubuntu 22.04 (x86_64, ARM64)
+     - Windows 2022 (x86_64, ARM64)
+   - 构建完成后自动上传二进制包到 GitHub Release
+
+3. **更新 Homebrew**：
+   - `release.yml` 工作流自动：
+     - 下载所有平台的二进制包
+     - 计算 SHA256 校验和
+     - 更新 `git-ca.rb` 公式中的 bottle 校验和
+     - 推送到 `homebrew-tap` 仓库
+
+4. **手动触发**（如需要）：
    ```bash
-   cargo build --release
-   tar -C target/release -czf git-ca-$VERSION-x86_64.tar.gz git-ca
-   shasum -a 256 git-ca-$VERSION-x86_64.tar.gz
-   ```
-4. 在 GitHub 创建 `v$VERSION` 标签与 Release，上传上述 tar 包。
+   # 更新版本号
+   vim Cargo.toml
 
-## 2. 更新 Homebrew 配方
+   # 提交并推送
+   git commit -m "chore: bump version"
+   git push origin main
 
-无论提交到官方 Homebrew Core 还是自建 tap，都需要更新 `git-ca.rb`：
-
-- 将 `url` 指向新发布的 tar 包。
-- 将 `sha256` 替换为最新校验值。
-- 调整 `version`。
-- 如依赖/构建步骤有变化（例如新增 `cmake`、`libomp`），同步更新 `depends_on`。
-
-### 方案 A：Homebrew Core
-1. Fork [Homebrew/homebrew-core](https://github.com/Homebrew/homebrew-core)。
-2. 更新 `Formula/g/git-ca.rb`。
-3. 运行 `brew audit --new-formula git-ca`（或 `--strict git-ca`）。
-4. 提交 PR，并在描述中附上`brew install --build-from-source git-ca`与`brew test git-ca`的输出。
-
-### 方案 B：自建 Tap
-1. 创建形如 `zh30/homebrew-tap` 的仓库。
-2. 将配方放在 `Formula/git-ca.rb`。
-3. 用户安装方式：
-   ```bash
-   brew tap zh30/tap
-  brew install git-ca
+   # 创建并推送标签
+   git tag v1.1.2
+   git push origin v1.1.2
    ```
 
-## 3. 本地验证
+#### 验证发布
 
-在提交前务必执行：
+在创建 PR 或推送标签前，验证 Homebrew 公式：
 
 ```bash
+# 本地验证
 brew install --build-from-source ./git-ca.rb
 brew test git-ca
-brew audit --strict git-ca
+brew audit --strict ./git-ca.rb
+
+# 验证 bottle 安装
+brew uninstall git-ca
+brew install zh30/tap/git-ca
+git ca --version
 ```
 
-测试内容应至少覆盖：
-- `git ca --version`
-- `git ca model`（交互式选择模型）
-- 运行一次 `git ca`，确认 llama.cpp 库能够被加载，且 fallback 行为正常。
+### Homebrew Formula 结构
 
-## 4. 发布后维护
+`git-ca.rb` 现在包含：
 
-- 更新 `README.md`、`INSTALL.md` 中的 Homebrew 示例命令。
-- 若默认模型或上下文配置有变更，请同步更新配方中的提示（`caveats`）。
-- 监控问题反馈，重点关注模型下载/依赖变更导致的安装失败。
+```ruby
+class GitCa < Formula
+  # ... 元数据 ...
+
+  # Bottle 支持 - 预构建二进制包
+  bottle do
+    root_url "https://github.com/zh30/git-commit-analyzer/releases/download/v#{version}"
+    sha256 cellar: :any_skip_relocate, arm64_sequoia: "SHA256_ARM64_MACOS"
+    sha256 cellar: :any_skip_relocate, x86_64_sequoia: "SHA256_X86_64_MACOS"
+    sha256 cellar: :any_skip_relocate, arm64_linux: "SHA256_ARM64_LINUX"
+    sha256 cellar: :any_skip_relocate, x86_64_linux: "SHA256_X86_64_LINUX"
+  end
+
+  # 安装时直接使用预构建二进制
+  def install
+    bin.install "git-ca"
+  end
+end
+```
+
+### 用户安装
+
+用户现在可以通过以下方式安装：
+
+```bash
+# 添加 tap
+brew tap zh30/tap
+
+# 安装（自动使用 bottle，无须从源码构建）
+brew install git-ca
+
+# 验证安装
+git ca --version
+```
+
+## 故障排除
+
+### 常见问题
+
+1. **bottle 校验和不匹配**：
+   - 检查二进制包是否正确构建
+   - 重新计算 SHA256 校验和
+   - 确保所有平台都已构建
+
+2. **构建失败**：
+   - 检查 `.github/workflows/build-binaries.yml` 中的依赖安装
+   - 确认 Rust 工具链版本
+   - 查看 GitHub Actions 日志
+
+3. **Homebrew 安装慢**：
+   - 检查 bottle URL 是否可访问
+   - 确认 GitHub Release 已创建
+   - 验证 `git-ca.rb` 中的 `root_url`
+
+### 调试步骤
+
+```bash
+# 检查 bottle 是否可用
+brew fetch --bottle-tag=arm64_sequoia zh30/tap/git-ca
+
+# 强制从源码安装（用于调试）
+HOMEBREW_NO_INSTALL_FROM_API=1 brew install --build-from-source zh30/tap/git-ca
+
+# 查看详细安装日志
+brew install -v zh30/tap/git-ca
+```
+
+## 最佳实践
+
+1. **版本管理**：
+   - 始终在 `Cargo.toml` 和 `git-ca.rb` 中保持版本一致
+   - 使用语义化版本号 (semver)
+
+2. **测试**：
+   - 在不同平台上测试 bottle
+   - 运行完整的 CI/CD 流程
+   - 验证用户安装体验
+
+3. **文档**：
+   - 更新 README.md 中的安装说明
+   - 保持 HOMEBREW.md 和 DEPLOY.md 最新
+   - 记录所有依赖变更

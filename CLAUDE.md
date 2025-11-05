@@ -114,11 +114,12 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 ## Common Development Tasks
 
 ### Add a Feature
-1. Edit `src/main.rs` for CLI logic or `src/llama.rs` for model handling
-2. Add unit tests in the `#[cfg(test)]` module (lines 1720-1865)
-3. Run: `cargo fmt && cargo clippy -- -D warnings && cargo test`
-4. Verify with: `cargo run -- git ca` in a test repo with staged changes
-5. Update documentation: `README.md`, `AGENTS.md`, `CLAUDE.md`
+1. **Architecture First**: Keep new logic scoped to `src/main.rs` or `src/llama.rs` until the surface area justifies extracting a module
+2. **Unit Tests**: Add inline tests in `#[cfg(test)]` modules beside the code they cover
+3. **Integration Tests**: Multi-step workflows combining Git operations + model inference should be promoted to a `tests/` directory
+4. **Verify**: Run `cargo fmt && cargo clippy -- -D warnings && cargo test`
+5. **Manual Testing**: Use `cargo run -- git ca` in a test repo with staged changes and document output in PR description
+6. **Documentation**: Update `README*.md`, `DEPLOY.md`, and `CLAUDE.md` when behavior changes
 
 ### Modify Model Handling
 - Update `LlamaSession` in `src/llama.rs` for inference logic
@@ -219,12 +220,14 @@ cargo build --release
 
 ## Architecture Decisions
 
-- **Single Binary**: No web服务 or extension - keeps deployment simple
-- **Local Inference**: Privacy and offline capability
+- **Single Binary**: No web service or extension - keeps deployment simple
+- **Local Inference**: Privacy and offline capability using llama.cpp directly (via `llama-cpp-sys-2`)
 - **Manual Args Parsing**: Avoids `clap` dependency bloat
-- **Inline Tests**: Co-located with code for easy maintenance
+- **Inline Tests**: Co-located with code for easy maintenance; integration flows go to `tests/`
 - **Deterministic Fallback**: Ensures commits succeed even when model fails
 - **No Async**: Simple synchronous execution pattern
+- **Minimal Modules**: Resist premature abstraction - keep logic in `main.rs`/`llama.rs` until justified
+- **Generated Assets**: Keep under `target/` or other ignored directories - never in `src/` or `tests/`
 
 ## Performance Considerations
 
@@ -242,10 +245,25 @@ cargo build --release
 - Sanitizes file paths and model paths
 - No code execution from model output
 
+## Coding Conventions
+
+### Naming
+- Functions/files: `snake_case`
+- Types/enums: `CamelCase`
+- Constants: `SCREAMING_SNAKE_CASE` (e.g., `COMMIT_TYPES`)
+
+### Error Handling
+- Prefer error propagation with `?` operator
+- Return `AppError::Custom` only when you need user-facing messages
+- Comments should explain non-obvious Git plumbing or llama-specific constraints
+
+### Formatting
+- Rustfmt defaults: 4-space indent, 100-column width
+- Run `cargo fmt` before committing
+
 ## Reminders
 
-- Respect existing instructions in `AGENTS.md`
 - Run `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test` before committing
-- Test both model generation and fallback paths
-- Update `DEPLOY.md` when changing release process
-- Document any new commands or configuration options
+- Test both model generation and fallback paths (stage deps-only diffs, runtime changes)
+- Update `README*.md`, `DEPLOY.md`, and `CLAUDE.md` when behavior changes
+- Document manual `git ca` verification steps in PR descriptions
