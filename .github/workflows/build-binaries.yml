@@ -121,15 +121,15 @@ jobs:
         run: |
           mkdir -p bottles
           cd artifacts
-          # Create Homebrew bottles with correct naming: git-ca-VERSION.PLATFORM.bottle.tar.gz
-          # Using matrix variables to ensure consistent platform naming
+          # Create Homebrew bottles with universal tags that work across macOS versions
+          # Using big_sur tags which are compatible with macOS 11+ and work on both macOS 13 and 14
           if [ -f "git-ca-apple-darwin-x86_64.tar.gz" ]; then
-            cp "git-ca-apple-darwin-x86_64.tar.gz" "../bottles/git-ca-${VERSION}.x86_64_sequoia.bottle.tar.gz"
-            echo "Created: git-ca-${VERSION}.x86_64_sequoia.bottle.tar.gz"
+            cp "git-ca-apple-darwin-x86_64.tar.gz" "../bottles/git-ca-${VERSION}.x86_64_big_sur.bottle.tar.gz"
+            echo "Created: git-ca-${VERSION}.x86_64_big_sur.bottle.tar.gz"
           fi
           if [ -f "git-ca-apple-darwin-arm64.tar.gz" ]; then
-            cp "git-ca-apple-darwin-arm64.tar.gz" "../bottles/git-ca-${VERSION}.arm64_sequoia.bottle.tar.gz"
-            echo "Created: git-ca-${VERSION}.arm64_sequoia.bottle.tar.gz"
+            cp "git-ca-apple-darwin-arm64.tar.gz" "../bottles/git-ca-${VERSION}.arm64_big_sur.bottle.tar.gz"
+            echo "Created: git-ca-${VERSION}.arm64_big_sur.bottle.tar.gz"
           fi
           cd ..
           ls -la bottles/
@@ -159,12 +159,12 @@ jobs:
           if [ -f "git-ca-apple-darwin-arm64.tar.gz" ]; then
             ARM64_SHA256=$(sha256sum "git-ca-apple-darwin-arm64.tar.gz" | awk '{print $1}')
             echo "ARM64_SHA256=${ARM64_SHA256}" >> $GITHUB_OUTPUT
-            echo "Generated arm64_sequoia checksum: ${ARM64_SHA256}"
+            echo "Generated arm64_big_sur checksum: ${ARM64_SHA256}"
           fi
           if [ -f "git-ca-apple-darwin-x86_64.tar.gz" ]; then
             X86_64_SHA256=$(sha256sum "git-ca-apple-darwin-x86_64.tar.gz" | awk '{print $1}')
             echo "X86_64_SHA256=${X86_64_SHA256}" >> $GITHUB_OUTPUT
-            echo "Generated x86_64_sequoia checksum: ${X86_64_SHA256}"
+            echo "Generated x86_64_big_sur checksum: ${X86_64_SHA256}"
           fi
 
       - name: Create checksums file
@@ -173,10 +173,10 @@ jobs:
           cd artifacts
           # Generate checksums for bottles (Homebrew format) instead of raw artifacts
           if [ -f "git-ca-apple-darwin-arm64.tar.gz" ]; then
-            sha256sum "git-ca-apple-darwin-arm64.tar.gz" | sed 's|git-ca-apple-darwin-arm64.tar.gz|git-ca-'${VERSION}'.arm64_sequoia.bottle.tar.gz|' >> ../checksums/checksums.txt
+            sha256sum "git-ca-apple-darwin-arm64.tar.gz" | sed 's|git-ca-apple-darwin-arm64.tar.gz|git-ca-'${VERSION}'.arm64_big_sur.bottle.tar.gz|' >> ../checksums/checksums.txt
           fi
           if [ -f "git-ca-apple-darwin-x86_64.tar.gz" ]; then
-            sha256sum "git-ca-apple-darwin-x86_64.tar.gz" | sed 's|git-ca-apple-darwin-x86_64.tar.gz|git-ca-'${VERSION}'.x86_64_sequoia.bottle.tar.gz|' >> ../checksums/checksums.txt
+            sha256sum "git-ca-apple-darwin-x86_64.tar.gz" | sed 's|git-ca-apple-darwin-x86_64.tar.gz|git-ca-'${VERSION}'.x86_64_big_sur.bottle.tar.gz|' >> ../checksums/checksums.txt
           fi
 
       - name: Create Release
@@ -195,10 +195,10 @@ jobs:
             ### Manual Download
 
             **macOS (Apple Silicon)**
-            - [git-ca-${{ steps.get_version.outputs.VERSION }}.arm64_sequoia.bottle.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}.arm64_sequoia.bottle.tar.gz)
+            - [git-ca-${{ steps.get_version.outputs.VERSION }}.arm64_big_sur.bottle.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}.arm64_big_sur.bottle.tar.gz)
 
             **macOS (Intel)**
-            - [git-ca-${{ steps.get_version.outputs.VERSION }}.x86_64_sequoia.bottle.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}.x86_sequoia.bottle.tar.gz)
+            - [git-ca-${{ steps.get_version.outputs.VERSION }}.x86_64_big_sur.bottle.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}.x86_64_big_sur.bottle.tar.gz)
 
             ## Installation
 
@@ -269,8 +269,8 @@ jobs:
             echo "  # Bottle support for pre-built binaries"
             echo "  bottle do"
             echo "    root_url \"https://github.com/zh30/git-commit-analyzer/releases/download/v${VERSION}\""
-            echo "    sha256 cellar: :any, arm64_sequoia: \"${ARM64_MACOS}\""
-            echo "    sha256 cellar: :any, x86_64_sequoia: \"${X86_64_MACOS}\""
+            echo "    sha256 cellar: :any, arm64_big_sur: \"${ARM64_MACOS}\""
+            echo "    sha256 cellar: :any, x86_64_big_sur: \"${X86_64_MACOS}\""
             echo "  end"
             echo ""
             echo "  def install"
