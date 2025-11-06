@@ -3,7 +3,7 @@ name: Build Binaries
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - "v*.*.*"
 
 jobs:
   build:
@@ -121,23 +121,16 @@ jobs:
         run: |
           mkdir -p bottles
           cd artifacts
-          # Rename files from git-ca-VERSION-PLATFORM.tar.gz to git-ca-VERSION.PLATFORM.bottle.tar.gz
-          for file in git-ca-*.tar.gz; do
-            if [ -f "$file" ]; then
-              # Extract version and platform from filename
-              filename=$(basename "$file" .tar.gz)
-              version="${filename#git-ca-}"
-              platform="${version#*-}"
-              version="${version%-${platform}}"
-
-              # Create bottle filename with dot separator
-              bottle_name="git-ca-${version}.${platform}.bottle.tar.gz"
-
-              # Copy and rename
-              cp "$file" "../bottles/${bottle_name}"
-              echo "Created: ${bottle_name}"
-            fi
-          done
+          # Create Homebrew bottles with correct naming: git-ca-VERSION.PLATFORM.bottle.tar.gz
+          # Using matrix variables to ensure consistent platform naming
+          if [ -f "git-ca-apple-darwin-x86_64.tar.gz" ]; then
+            cp "git-ca-apple-darwin-x86_64.tar.gz" "../bottles/git-ca-${VERSION}.x86_64_sequoia.bottle.tar.gz"
+            echo "Created: git-ca-${VERSION}.x86_64_sequoia.bottle.tar.gz"
+          fi
+          if [ -f "git-ca-apple-darwin-arm64.tar.gz" ]; then
+            cp "git-ca-apple-darwin-arm64.tar.gz" "../bottles/git-ca-${VERSION}.arm64_sequoia.bottle.tar.gz"
+            echo "Created: git-ca-${VERSION}.arm64_sequoia.bottle.tar.gz"
+          fi
           cd ..
           ls -la bottles/
 
@@ -162,13 +155,13 @@ jobs:
         run: |
           mkdir checksums
           cd artifacts
-          find . -name "git-ca-*" -type f | while read file; do
-            if [[ "$file" == *.tar.gz ]]; then
-              sha256sum "$file" >> ../checksums/checksums.txt
-            elif [[ "$file" == *.zip ]]; then
-              sha256sum "$file" >> ../checksums/checksums.txt
-            fi
-          done
+          # Generate checksums for bottles (Homebrew format) instead of raw artifacts
+          if [ -f "git-ca-apple-darwin-arm64.tar.gz" ]; then
+            sha256sum "git-ca-apple-darwin-arm64.tar.gz" | sed 's|git-ca-apple-darwin-arm64.tar.gz|git-ca-'${VERSION}'.arm64_sequoia.bottle.tar.gz|' >> ../checksums/checksums.txt
+          fi
+          if [ -f "git-ca-apple-darwin-x86_64.tar.gz" ]; then
+            sha256sum "git-ca-apple-darwin-x86_64.tar.gz" | sed 's|git-ca-apple-darwin-x86_64.tar.gz|git-ca-'${VERSION}'.x86_64_sequoia.bottle.tar.gz|' >> ../checksums/checksums.txt
+          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -212,8 +205,6 @@ jobs:
           files: |
             bottles/*.bottle.tar.gz
             checksums/checksums.txt
-            artifacts/**/*.tar.gz
-            artifacts/**/*.zip
 
       - name: Update Homebrew Formula
         env:
