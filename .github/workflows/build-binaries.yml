@@ -212,6 +212,8 @@ jobs:
           files: |
             bottles/*.bottle.tar.gz
             checksums/checksums.txt
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
 
       - name: Update Homebrew Formula
         env:
