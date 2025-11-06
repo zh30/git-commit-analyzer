@@ -152,6 +152,22 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Compute checksums
+        id: checksums
+        run: |
+          cd artifacts
+          # Generate checksums for bottles (Homebrew format) and save as step outputs
+          if [ -f "git-ca-apple-darwin-arm64.tar.gz" ]; then
+            ARM64_SHA256=$(sha256sum "git-ca-apple-darwin-arm64.tar.gz" | awk '{print $1}')
+            echo "ARM64_SHA256=${ARM64_SHA256}" >> $GITHUB_OUTPUT
+            echo "Generated arm64_sequoia checksum: ${ARM64_SHA256}"
+          fi
+          if [ -f "git-ca-apple-darwin-x86_64.tar.gz" ]; then
+            X86_64_SHA256=$(sha256sum "git-ca-apple-darwin-x86_64.tar.gz" | awk '{print $1}')
+            echo "X86_64_SHA256=${X86_64_SHA256}" >> $GITHUB_OUTPUT
+            echo "Generated x86_64_sequoia checksum: ${X86_64_SHA256}"
+          fi
+
+      - name: Create checksums file
         run: |
           mkdir checksums
           cd artifacts
@@ -213,12 +229,9 @@ jobs:
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
 
-          # Download checksums.txt from release to extract bottle checksums
-          gh release download v${VERSION} --pattern checksums.txt --dir ./homebrew-update/
-
-          # Extract checksums for each platform
-          ARM64_MACOS=$(grep "apple-darwin-arm64" ./homebrew-update/checksums.txt | awk '{print $1}')
-          X86_64_MACOS=$(grep "apple-darwin-x86_64" ./homebrew-update/checksums.txt | awk '{print $1}')
+          # Use checksums from step outputs (no need to download from release)
+          ARM64_MACOS="${{ steps.checksums.outputs.ARM64_SHA256 }}"
+          X86_64_MACOS="${{ steps.checksums.outputs.X86_64_SHA256 }}"
 
           echo "ARM64_MACOS=${ARM64_MACOS}"
           echo "X86_64_MACOS=${X86_64_MACOS}"
