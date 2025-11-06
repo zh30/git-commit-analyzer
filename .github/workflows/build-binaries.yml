@@ -88,11 +88,38 @@ jobs:
             tar czf git-ca-${{ matrix.suffix }}.tar.gz git-ca
           fi
 
+      - name: Create metadata file
+        if: matrix.os == 'macos-13' || matrix.os == 'macos-14'
+        run: |
+          # Detect macOS version to determine correct bottle tag
+          MACOS_VERSION=$(sw_vers -productVersion)
+          MAJOR_VERSION=$(echo $MACOS_VERSION | cut -d. -f1)
+          MINOR_VERSION=$(echo $MACOS_VERSION | cut -d. -f2)
+
+          if [ "$MAJOR_VERSION" -ge 15 ]; then
+            BOTTLE_TAG="tahoe"
+          elif [ "$MAJOR_VERSION" -eq 14 ]; then
+            BOTTLE_TAG="sonoma"
+          elif [ "$MAJOR_VERSION" -eq 13 ]; then
+            BOTTLE_TAG="ventura"
+          else
+            BOTTLE_TAG="big_sur"
+          fi
+
+          echo "Detected macOS version: ${MACOS_VERSION}, using bottle tag: ${BOTTLE_TAG}"
+
+          # Create metadata file for the release job
+          mkdir -p metadata
+          echo "{\"bottle_tag\": \"${BOTTLE_TAG}\", \"os_version\": \"${MACOS_VERSION}\", \"platform\": \"${{ matrix.suffix }}\"}" > metadata/bottle_metadata.json
+          cat metadata/bottle_metadata.json
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: git-ca-${{ matrix.suffix }}
-          path: target/${{ matrix.target }}/release/git-ca-${{ matrix.suffix }}.*
+          path: |
+            target/${{ matrix.target }}/release/git-ca-${{ matrix.suffix }}.*
+            metadata/
           retention-days: 30
 
   release:
@@ -117,26 +144,55 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R artifacts/
 
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Extract bottle tags from metadata
+        id: extract_tags
+        run: |
+          # Extract bottle tags from metadata files
+          echo "Extracting bottle tags from metadata..."
+
+          # Find all metadata files
+          for metadata_file in artifacts/*/metadata/bottle_metadata.json; do
+            if [ -f "$metadata_file" ]; then
+              echo "Found metadata: $metadata_file"
+              bottle_tag=$(jq -r '.bottle_tag' "$metadata_file")
+              platform=$(jq -r '.platform' "$metadata_file")
+              echo "Platform: $platform, Bottle tag: $bottle_tag"
+
+              # Store in environment for later use
+              if [[ "$platform" == *"x86_64"* ]]; then
+                echo "X86_64_BOTTLE_TAG=${bottle_tag}" >> $GITHUB_OUTPUT
+                echo "Detected x86_64 bottle tag: ${bottle_tag}"
+              elif [[ "$platform" == *"arm64"* ]]; then
+                echo "ARM64_BOTTLE_TAG=${bottle_tag}" >> $GITHUB_OUTPUT
+                echo "Detected arm64 bottle tag: ${bottle_tag}"
+              fi
+            fi
+          done
+
       - name: Create Homebrew bottles
         run: |
           mkdir -p bottles
           cd artifacts
-          # Create Homebrew bottles with universal tags that work across macOS versions
-          # Using big_sur tags which are compatible with macOS 11+ and work on both macOS 13 and 14
+          # Use bottle tags from extracted metadata
+          ARM64_TAG="${ARM64_BOTTLE_TAG:-tahoe}"
+          X86_64_TAG="${X86_64_BOTTLE_TAG:-tahoe}"
+
+          echo "Using bottle tags: arm64=${ARM64_TAG}, x86_64=${X86_64_TAG}"
+
           if [ -f "git-ca-apple-darwin-x86_64.tar.gz" ]; then
-            cp "git-ca-apple-darwin-x86_64.tar.gz" "../bottles/git-ca-${VERSION}.x86_64_big_sur.bottle.tar.gz"
-            echo "Created: git-ca-${VERSION}.x86_64_big_sur.bottle.tar.gz"
+            cp "git-ca-apple-darwin-x86_64.tar.gz" "../bottles/git-ca-${VERSION}.x86_64_${X86_64_TAG}.bottle.tar.gz"
+            echo "Created: git-ca-${VERSION}.x86_64_${X86_64_TAG}.bottle.tar.gz"
           fi
           if [ -f "git-ca-apple-darwin-arm64.tar.gz" ]; then
-            cp "git-ca-apple-darwin-arm64.tar.gz" "../bottles/git-ca-${VERSION}.arm64_big_sur.bottle.tar.gz"
-            echo "Created: git-ca-${VERSION}.arm64_big_sur.bottle.tar.gz"
+            cp "git-ca-apple-darwin-arm64.tar.gz" "../bottles/git-ca-${VERSION}.arm64_${ARM64_TAG}.bottle.tar.gz"
+            echo "Created: git-ca-${VERSION}.arm64_${ARM64_TAG}.bottle.tar.gz"
           fi
           cd ..
           ls -la bottles/
-
-      - name: Get version from tag
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Generate changelog
         id: changelog
@@ -156,27 +212,35 @@ jobs:
         run: |
           cd artifacts
           # Generate checksums for bottles (Homebrew format) and save as step outputs
+          ARM64_TAG="${ARM64_BOTTLE_TAG:-tahoe}"
+          X86_64_TAG="${X86_64_BOTTLE_TAG:-tahoe}"
+
           if [ -f "git-ca-apple-darwin-arm64.tar.gz" ]; then
             ARM64_SHA256=$(sha256sum "git-ca-apple-darwin-arm64.tar.gz" | awk '{print $1}')
             echo "ARM64_SHA256=${ARM64_SHA256}" >> $GITHUB_OUTPUT
-            echo "Generated arm64_big_sur checksum: ${ARM64_SHA256}"
+            echo "ARM64_BOTTLE_TAG=arm64_${ARM64_TAG}" >> $GITHUB_OUTPUT
+            echo "Generated arm64_${ARM64_TAG} checksum: ${ARM64_SHA256}"
           fi
           if [ -f "git-ca-apple-darwin-x86_64.tar.gz" ]; then
             X86_64_SHA256=$(sha256sum "git-ca-apple-darwin-x86_64.tar.gz" | awk '{print $1}')
             echo "X86_64_SHA256=${X86_64_SHA256}" >> $GITHUB_OUTPUT
-            echo "Generated x86_64_big_sur checksum: ${X86_64_SHA256}"
+            echo "X86_64_BOTTLE_TAG=x86_64_${X86_64_TAG}" >> $GITHUB_OUTPUT
+            echo "Generated x86_64_${X86_64_TAG} checksum: ${X86_64_SHA256}"
           fi
 
       - name: Create checksums file
         run: |
           mkdir checksums
           cd artifacts
+          ARM64_TAG="${ARM64_BOTTLE_TAG:-tahoe}"
+          X86_64_TAG="${X86_64_BOTTLE_TAG:-tahoe}"
+
           # Generate checksums for bottles (Homebrew format) instead of raw artifacts
           if [ -f "git-ca-apple-darwin-arm64.tar.gz" ]; then
-            sha256sum "git-ca-apple-darwin-arm64.tar.gz" | sed 's|git-ca-apple-darwin-arm64.tar.gz|git-ca-'${VERSION}'.arm64_big_sur.bottle.tar.gz|' >> ../checksums/checksums.txt
+            sha256sum "git-ca-apple-darwin-arm64.tar.gz" | sed "s|git-ca-apple-darwin-arm64.tar.gz|git-ca-${VERSION}.arm64_${ARM64_TAG}.bottle.tar.gz|" >> ../checksums/checksums.txt
           fi
           if [ -f "git-ca-apple-darwin-x86_64.tar.gz" ]; then
-            sha256sum "git-ca-apple-darwin-x86_64.tar.gz" | sed 's|git-ca-apple-darwin-x86_64.tar.gz|git-ca-'${VERSION}'.x86_64_big_sur.bottle.tar.gz|' >> ../checksums/checksums.txt
+            sha256sum "git-ca-apple-darwin-x86_64.tar.gz" | sed "s|git-ca-apple-darwin-x86_64.tar.gz|git-ca-${VERSION}.x86_64_${X86_64_TAG}.bottle.tar.gz|" >> ../checksums/checksums.txt
           fi
 
       - name: Create Release
@@ -195,10 +259,10 @@ jobs:
             ### Manual Download
 
             **macOS (Apple Silicon)**
-            - [git-ca-${{ steps.get_version.outputs.VERSION }}.arm64_big_sur.bottle.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}.arm64_big_sur.bottle.tar.gz)
+            - [git-ca-${{ steps.get_version.outputs.VERSION }}.arm64_${ARM64_BOTTLE_TAG}.bottle.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}.arm64_${ARM64_BOTTLE_TAG}.bottle.tar.gz)
 
             **macOS (Intel)**
-            - [git-ca-${{ steps.get_version.outputs.VERSION }}.x86_64_big_sur.bottle.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}.x86_64_big_sur.bottle.tar.gz)
+            - [git-ca-${{ steps.get_version.outputs.VERSION }}.x86_64_${X86_64_BOTTLE_TAG}.bottle.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/git-ca-${{ steps.get_version.outputs.VERSION }}.x86_64_${X86_64_BOTTLE_TAG}.bottle.tar.gz)
 
             ## Installation
 
@@ -232,9 +296,13 @@ jobs:
           # Use checksums from step outputs (no need to download from release)
           ARM64_MACOS="${{ steps.checksums.outputs.ARM64_SHA256 }}"
           X86_64_MACOS="${{ steps.checksums.outputs.X86_64_SHA256 }}"
+          ARM64_BOTTLE_TAG="${{ steps.checksums.outputs.ARM64_BOTTLE_TAG }}"
+          X86_64_BOTTLE_TAG="${{ steps.checksums.outputs.X86_64_BOTTLE_TAG }}"
 
           echo "ARM64_MACOS=${ARM64_MACOS}"
           echo "X86_64_MACOS=${X86_64_MACOS}"
+          echo "ARM64_BOTTLE_TAG=${ARM64_BOTTLE_TAG}"
+          echo "X86_64_BOTTLE_TAG=${X86_64_BOTTLE_TAG}"
 
           # Download source tarball and calculate checksum
           TARBALL_URL="https://github.com/${{ github.repository }}/archive/refs/tags/v${VERSION}.tar.gz"
@@ -269,8 +337,8 @@ jobs:
             echo "  # Bottle support for pre-built binaries"
             echo "  bottle do"
             echo "    root_url \"https://github.com/zh30/git-commit-analyzer/releases/download/v${VERSION}\""
-            echo "    sha256 cellar: :any, arm64_big_sur: \"${ARM64_MACOS}\""
-            echo "    sha256 cellar: :any, x86_64_big_sur: \"${X86_64_MACOS}\""
+            echo "    sha256 cellar: :any, ${ARM64_BOTTLE_TAG}: \"${ARM64_MACOS}\""
+            echo "    sha256 cellar: :any, ${X86_64_BOTTLE_TAG}: \"${X86_64_MACOS}\""
             echo "  end"
             echo ""
             echo "  def install"
