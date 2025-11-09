@@ -269,8 +269,14 @@ jobs:
             echo "  # Bottle support for pre-built binaries"
             echo "  bottle do"
             echo "    root_url \"https://github.com/zh30/git-commit-analyzer/releases/download/v${VERSION}\""
-            echo "    sha256 cellar: :any, arm64_sequoia: \"${ARM64_MACOS}\""
-            echo "    sha256 cellar: :any, x86_64_sequoia: \"${X86_64_MACOS}\""
+
+            # Only add SHA256 lines if the values are not empty
+            if [ -n "${ARM64_MACOS}" ]; then
+              echo "    sha256 cellar: :any_skip_relocate, arm64_sequoia: \"${ARM64_MACOS}\""
+            fi
+            if [ -n "${X86_64_MACOS}" ]; then
+              echo "    sha256 cellar: :any_skip_relocate, x86_64_sequoia: \"${X86_64_MACOS}\""
+            fi
             echo "  end"
             echo ""
             echo "  def install"

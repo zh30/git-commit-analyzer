@@ -34,7 +34,18 @@ This installs a pre-built binary for your platform:
 
 **No Rust toolchain or compilation needed!** The binary is automatically downloaded from GitHub Releases.
 
-**Note**: Linux builds are temporarily disabled due to compilation issues. Windows builds are available via [GitHub Releases](https://github.com/zh30/git-commit-analyzer/releases) but not distributed via Homebrew.
+**Note**: If you encounter a version mismatch error, try:
+```bash
+brew update
+brew upgrade git-ca
+```
+
+Or install from source:
+```bash
+brew install --build-from-source git-ca
+```
+
+Linux builds are temporarily disabled due to compilation issues. Windows builds are available via [GitHub Releases](https://github.com/zh30/git-commit-analyzer/releases) but not distributed via Homebrew.
 
 ### Manual Installation
 
@@ -42,7 +53,7 @@ Download the appropriate binary for your platform from [Releases](https://github
 
 ```bash
 # macOS (Apple Silicon)
-curl -L -o git-ca.tar.gz https://github.com/zh30/git-commit-analyzer/releases/download/v1.1.2/git-ca-1.1.2-apple-darwin-arm64.tar.gz
+curl -L -o git-ca.tar.gz https://github.com/zh30/git-commit-analyzer/releases/download/v2.0.12/git-ca-2.0.12-apple-darwin-arm64.tar.gz
 tar -xzf git-ca.tar.gz
 sudo mv git-ca /usr/local/bin/
 chmod +x /usr/local/bin/git-ca
