@@ -2,6 +2,9 @@
 
 [中文](README_ZH.md) · [Français](README_FR.md) · [Español](README_ES.md)
 
+- Official website: https://zhanghe.dev/products/git-commit-analyzer
+- Releases: https://github.com/zh30/git-commit-analyzer/releases
+
 Git Commit Analyzer is a Rust-based Git plugin that generates Git Flow–style commit messages from your staged diff using a local llama.cpp model. The CLI summarises large diffs, validates model output, and falls back to deterministic messages when needed.
 
 ## Key Features
