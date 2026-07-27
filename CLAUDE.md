@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Purpose**: CLI helper that generates Git Flow–style commit messages from staged changes using local llama.cpp inference.
+**Purpose**: CLI helper that generates Conventional Commits messages from staged changes using local llama.cpp inference.
 
 **Runtime**: Pure Rust binary (`bin = "git-ca"`). No web services or VS Code extension.
 
@@ -48,7 +48,7 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 
 **4. Prompt Engineering (src/main.rs)**
 - Builds language-specific prompts (English/Chinese)
-- Enforces Git Flow format: `<type>(<scope>): <subject>`
+- Enforces Conventional Commits format: `<type>(<scope>): <subject>`
 - Includes strict validation rules
 - Stricter retry prompts on subsequent attempts
 
@@ -61,7 +61,7 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 
 **6. Response Processing (src/main.rs)**
 - Strips `<thinking>` blocks if present
-- Extracts commit subject line matching Git Flow pattern
+- Extracts commit subject line matching the Conventional Commits pattern
 - Collects body text until instruction keywords detected
 - Validates against `COMMIT_TYPES` array
 
@@ -74,7 +74,7 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 - Handles special cases: dependency updates, runtime changes, retry patterns
 
 **8. Validation (src/main.rs)**
-- `is_valid_commit_message()` - enforces Git Flow format
+- `is_valid_commit_message()` - enforces Conventional Commits format
 - `parse_commit_subject()` - extracts type, optional scope, and subject
 - English mode requires ASCII subject line
 - Triggers retry loop on invalid output
@@ -177,7 +177,7 @@ cargo test handles_extracts_subject_line
 **Unit Tests** (in `#[cfg(test)]` at bottom of `main.rs`):
 - `handles_extracts_subject_line` - Response parsing
 - `handles_includes_body_until_instruction` - Body extraction
-- `validates_git_flow_subject` - Validation logic
+- `validates_conventional_commit_subject` - Validation logic
 - `fallback_generates_for_*` - Fallback behavior
 - `truncates_diff_for_prompt` - Diff summarization
 

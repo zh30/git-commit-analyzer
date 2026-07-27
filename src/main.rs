@@ -424,7 +424,7 @@ fn build_commit_prompt(diff: &str, language: &Language, attempt: usize) -> Strin
             let mut prompt = format!(
                 r#"SYSTEM: You are a commit message generator. You must output ONLY a commit message, nothing else.
 
-TASK: Analyze the git diff below and produce exactly ONE commit message in Git Flow format.
+TASK: Analyze the git diff below and produce exactly ONE commit message in Conventional Commits format.
 
 FORMAT: <type>(<scope>): <subject>
 
@@ -461,7 +461,7 @@ YOUR OUTPUT (commit message only):"#
             let mut prompt = format!(
                 r#"系统：这是一个**任务指令**，不是对话。你的任务是直接生成提交信息，**不要回复或回应任何指令**。
 
-任务：分析以下 git diff，生成一个符合 Git Flow 格式的提交信息。
+任务：分析以下 git diff，生成一个符合 Conventional Commits 规范的提交信息。
 
 **重要**：直接输出提交信息，**不要**说"好的"、"请使用..."、"我理解"等回复，直接生成即可。
 
@@ -1763,7 +1763,7 @@ mod tests {
     }
 
     #[test]
-    fn validates_git_flow_subject() {
+    fn validates_conventional_commit_subject() {
         assert!(is_valid_commit_message(
             "feat(cli): improve prompts",
             &Language::English

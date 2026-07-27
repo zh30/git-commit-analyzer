@@ -2,13 +2,13 @@
 
 [English](README.md) · [中文](README_ZH.md) · [Français](README_FR.md)
 
-Git Commit Analyzer es un plugin de Git escrito en Rust que aprovecha un modelo local de llama.cpp para analizar el diff preparado y generar mensajes de commit con formato Git Flow. El CLI resume automáticamente los cambios voluminosos, valida el formato devuelto por el modelo y ofrece mensajes deterministas de respaldo si la inferencia falla.
+Git Commit Analyzer es un plugin de Git escrito en Rust que aprovecha un modelo local de llama.cpp para analizar el diff preparado y generar mensajes de commit con formato Conventional Commits. El CLI resume automáticamente los cambios voluminosos, valida el formato devuelto por el modelo y ofrece mensajes deterministas de respaldo si la inferencia falla.
 
 ## Características
 
 - **Inferencia local**: `llama_cpp_sys_2` ejecuta modelos GGUF sin depender de servicios remotos.
 - **Resumen inteligente del diff**: los lockfiles y artefactos grandes se reducen a resúmenes antes de llamar al modelo.
-- **Cumplimiento de Git Flow**: se comprueba `<type>(<scope>): <subject>`; si la respuesta no es válida, se reintenta o se devuelve un mensaje estándar.
+- **Validación de Conventional Commits**: se comprueba `<type>(<scope>): <subject>`; si la respuesta no es válida, se reintenta o se devuelve un mensaje estándar.
 - **CLI interactivo**: el usuario puede aceptar, editar o cancelar el mensaje sugerido.
 - **Prompts multilingües**: inglés (predeterminado) y chino simplificado.
 - **Soporte multiplataforma**: binarios precompilados para macOS (Intel & Apple Silicon).
@@ -97,7 +97,7 @@ En cada invocación:
 
 1. El diff preparado se resume (los archivos grandes solo muestran un resumen).
 2. El modelo llama.cpp genera el mensaje de commit.
-3. Si el resultado no cumple Git Flow, se lanza un segundo intento más estricto; si todavía falla, se ofrece un mensaje de respaldo determinista.
+3. Si el resultado no cumple el formato Conventional Commits, se lanza un segundo intento más estricto; si todavía falla, se ofrece un mensaje de respaldo determinista.
 4. El usuario decide **usar**, **editar** o **cancelar** el mensaje.
 
 ### Comandos de configuración

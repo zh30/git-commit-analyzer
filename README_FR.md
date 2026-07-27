@@ -2,13 +2,13 @@
 
 [English](README.md) · [中文](README_ZH.md) · [Español](README_ES.md)
 
-Git Commit Analyzer est un plugin Git écrit en Rust qui exploite un modèle llama.cpp local pour analyser le diff déjà indexé et produire des messages de commit conformes à Git Flow. Le CLI résume automatiquement les gros fichiers, valide la structure de la réponse et fournit un message de secours déterministe en cas d'échec du modèle.
+Git Commit Analyzer est un plugin Git écrit en Rust qui exploite un modèle llama.cpp local pour analyser le diff déjà indexé et produire des messages de commit conformes à la spécification Conventional Commits. Le CLI résume automatiquement les gros fichiers, valide la structure de la réponse et fournit un message de secours déterministe en cas d'échec du modèle.
 
 ## Fonctionnalités
 
 - **Inférence locale** : `llama_cpp_sys_2` exécute des modèles GGUF sans dépendre d'une API distante.
 - **Résumé intelligent du diff** : les fichiers volumineux (lockfiles, artefacts) sont réduits à des résumés avant l'appel au modèle.
-- **Respect de Git Flow** : vérifie la forme `<type>(<scope>): <subject>` et retente/échoue proprement si nécessaire.
+- **Validation Conventional Commits** : vérifie la forme `<type>(<scope>): <subject>` et retente/échoue proprement si nécessaire.
 - **CLI interactif** : vous pouvez accepter, éditer ou annuler le message proposé.
 - **Prompts multilingues** : anglais (par défaut) et chinois simplifié.
 - **Support multi-plateforme** : binaires pré-compilés pour macOS (Intel & Apple Silicon).
@@ -97,7 +97,7 @@ git ca
 
 1. Le diff indexé est condensé (les fichiers volumineux apparaissent sous forme de résumé).
 2. Le modèle llama.cpp génère un message de commit.
-3. Si la réponse ne respecte pas Git Flow, une tentative plus stricte est effectuée ; à défaut, un message de secours déterministe est proposé.
+3. Si la réponse ne respecte pas le format Conventional Commits, une tentative plus stricte est effectuée ; à défaut, un message de secours déterministe est proposé.
 4. Vous décidez d'**utiliser**, **éditer** ou **annuler** le message.
 
 ### Commandes de configuration
