@@ -11,9 +11,207 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 const CONFIG_LANGUAGE_KEY: &str = "commit-analyzer.language";
+const CONFIG_MODEL_TIER_KEY: &str = "commit-analyzer.model-tier";
+const CONFIG_CONTEXT_KEY: &str = "commit-analyzer.context";
 const COMMIT_TYPES: &[&str] = &["feat", "fix", "docs", "style", "refactor", "test", "chore"];
-const DEFAULT_MODEL_REPO: &str = "unsloth/gemma-3-270m-it-GGUF";
-const DEFAULT_CONTEXT_SIZE: i32 = 1024;
+/// Fallback when hardware probing is unavailable.
+const MIN_CONTEXT_SIZE: i32 = 2048;
+const MAX_CONTEXT_SIZE: i32 = 32768;
+
+/// Model quality/size tiers for any-device deployments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelTier {
+    /// ~0.6B — low-RAM / older machines.
+    Small,
+    /// ~1.7B — balanced default for most machines.
+    Default,
+    /// ~4B — higher quality when memory allows.
+    Quality,
+}
+
+impl ModelTier {
+    fn from_str(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "small" | "s" | "low" | "0.6b" | "0.5b" | "tiny" => Some(Self::Small),
+            "default" | "d" | "medium" | "med" | "1.7b" | "1.5b" | "balanced" => {
+                Some(Self::Default)
+            }
+            "quality" | "q" | "high" | "4b" | "3b" | "large" => Some(Self::Quality),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Default => "default",
+            Self::Quality => "quality",
+        }
+    }
+
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::Small => "small (Qwen3-0.6B)",
+            Self::Default => "default (Qwen3-1.7B)",
+            Self::Quality => "quality (Qwen3-4B)",
+        }
+    }
+
+    fn repo_id(self) -> &'static str {
+        match self {
+            // Official Qwen3 GGUF repos (post-trained chat models; prefer Q4_K_M at download).
+            Self::Small => "Qwen/Qwen3-0.6B-GGUF",
+            Self::Default => "Qwen/Qwen3-1.7B-GGUF",
+            Self::Quality => "Qwen/Qwen3-4B-GGUF",
+        }
+    }
+
+    /// Recommended llama.cpp context length for this tier.
+    fn recommended_context(self) -> i32 {
+        match self {
+            Self::Small => 4096,
+            Self::Default => 8192,
+            Self::Quality => 16384,
+        }
+    }
+
+    /// Approximate Q4 weights size in MiB (for messaging / headroom checks).
+    fn approx_weight_mib(self) -> u64 {
+        match self {
+            Self::Small => 450,
+            Self::Default => 1200,
+            Self::Quality => 2500,
+        }
+    }
+
+    /// Pick a tier from total system RAM (MiB).
+    fn from_total_ram_mib(total_ram_mib: u64) -> Self {
+        if total_ram_mib < 8 * 1024 {
+            Self::Small
+        } else if total_ram_mib < 16 * 1024 {
+            Self::Default
+        } else {
+            Self::Quality
+        }
+    }
+
+    fn all() -> [Self; 3] {
+        [Self::Small, Self::Default, Self::Quality]
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HardwareProfile {
+    total_ram_mib: Option<u64>,
+    recommended_tier: ModelTier,
+    recommended_context: i32,
+}
+
+impl HardwareProfile {
+    fn detect() -> Self {
+        let total_ram_mib = detect_total_memory_mib();
+        let recommended_tier = total_ram_mib
+            .map(ModelTier::from_total_ram_mib)
+            .unwrap_or(ModelTier::Default);
+        let recommended_context =
+            clamp_context_size(recommended_tier.recommended_context(), total_ram_mib);
+        Self {
+            total_ram_mib,
+            recommended_tier,
+            recommended_context,
+        }
+    }
+}
+
+fn clamp_context_size(requested: i32, total_ram_mib: Option<u64>) -> i32 {
+    let mut ctx = requested.clamp(MIN_CONTEXT_SIZE, MAX_CONTEXT_SIZE);
+    if let Some(ram) = total_ram_mib {
+        // Keep headroom for OS + weights + KV cache (very rough heuristic).
+        let max_by_ram = if ram < 6 * 1024 {
+            4096
+        } else if ram < 12 * 1024 {
+            8192
+        } else if ram < 24 * 1024 {
+            16384
+        } else {
+            MAX_CONTEXT_SIZE
+        };
+        ctx = ctx.min(max_by_ram);
+    }
+    ctx
+}
+
+fn detect_total_memory_mib() -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let bytes: u64 = text.trim().parse().ok()?;
+        Some(bytes / (1024 * 1024))
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let contents = fs::read_to_string("/proc/meminfo").ok()?;
+        for line in contents.lines() {
+            if let Some(rest) = line.strip_prefix("MemTotal:") {
+                let kib: u64 = rest
+                    .split_whitespace()
+                    .next()
+                    .and_then(|v| v.parse().ok())?;
+                return Some(kib / 1024);
+            }
+        }
+        return None;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let output = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory",
+            ])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let bytes: u64 = text.trim().parse().ok()?;
+        return Some(bytes / (1024 * 1024));
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        None
+    }
+}
+
+fn resolve_context_size(git_config: &GitConfig, hardware: &HardwareProfile) -> i32 {
+    if let Ok(raw) = git_config.get(CONFIG_CONTEXT_KEY) {
+        if let Ok(parsed) = raw.trim().parse::<i32>() {
+            return clamp_context_size(parsed, hardware.total_ram_mib);
+        }
+    }
+    hardware.recommended_context
+}
+
+fn resolve_model_tier(git_config: &GitConfig, hardware: &HardwareProfile) -> ModelTier {
+    if let Ok(raw) = git_config.get(CONFIG_MODEL_TIER_KEY) {
+        if let Some(tier) = ModelTier::from_str(&raw) {
+            return tier;
+        }
+    }
+    hardware.recommended_tier
+}
 
 #[derive(Debug, Clone, PartialEq)]
 enum Language {
@@ -111,13 +309,6 @@ impl Language {
         match self {
             Language::English => "\nDetected GGUF models:",
             Language::Chinese => "\n检测到的 GGUF 模型：",
-        }
-    }
-
-    fn select_model_prompt(&self) -> &'static str {
-        match self {
-            Language::English => "\nEnter a model number or provide a full GGUF path: ",
-            Language::Chinese => "\n输入模型编号或直接提供 GGUF 文件路径：",
         }
     }
 
@@ -253,13 +444,6 @@ impl Language {
         }
     }
 
-    fn truncated_body_notice(&self) -> &'static str {
-        match self {
-            Language::English => "[Additional hunks truncated]",
-            Language::Chinese => "[更多变更已截断]",
-        }
-    }
-
     fn no_models_found(&self) -> &'static str {
         match self {
             Language::English => "No GGUF models found in default locations. Download a model first or provide its path manually.",
@@ -319,18 +503,83 @@ impl Language {
     fn model_pull_hint(&self) -> &'static str {
         match self {
             Language::English => {
-                "Tip: run 'git ca model pull <repo>' to download from Hugging Face."
+                "Tip: run 'git ca model pull [small|default|quality|<repo>]' to download a tier or custom GGUF."
             }
             Language::Chinese => {
-                "提示：运行 'git ca model pull <仓库>' 可从 Hugging Face 下载模型。"
+                "提示：运行 'git ca model pull [small|default|quality|<仓库>]' 可下载档位模型或自定义 GGUF。"
             }
         }
     }
 
-    fn model_pull_usage(&self) -> &'static str {
+    fn hardware_profile_label(&self) -> &'static str {
         match self {
-            Language::English => "Usage: git ca model pull <repo>",
-            Language::Chinese => "用法：git ca model pull <仓库>",
+            Language::English => "Hardware profile:",
+            Language::Chinese => "硬件概况：",
+        }
+    }
+
+    fn recommended_tier_label(&self) -> &'static str {
+        match self {
+            Language::English => "Recommended model tier: {}",
+            Language::Chinese => "推荐模型档位：{}",
+        }
+    }
+
+    fn using_context_label(&self) -> &'static str {
+        match self {
+            Language::English => "Using context length: {} tokens",
+            Language::Chinese => "使用上下文长度：{} tokens",
+        }
+    }
+
+    fn auto_selected_tier(&self) -> &'static str {
+        match self {
+            Language::English => "Auto-selected model tier '{}' based on system memory.",
+            Language::Chinese => "已根据系统内存自动选择模型档位“{}”。",
+        }
+    }
+
+    fn tier_persisted(&self) -> &'static str {
+        match self {
+            Language::English => "Model tier preference saved: {}",
+            Language::Chinese => "模型档位偏好已保存：{}",
+        }
+    }
+
+    fn available_tiers(&self) -> &'static str {
+        match self {
+            Language::English => "Model tiers:",
+            Language::Chinese => "模型档位：",
+        }
+    }
+
+    fn select_tier_prompt(&self) -> &'static str {
+        match self {
+            Language::English => {
+                "\nSelect a tier number, enter a GGUF path, or press Enter for the recommended tier: "
+            }
+            Language::Chinese => "\n输入档位编号、GGUF 路径，或直接回车使用推荐档位：",
+        }
+    }
+
+    fn key_changes_heading(&self) -> &'static str {
+        match self {
+            Language::English => "Key changes:",
+            Language::Chinese => "关键变更：",
+        }
+    }
+
+    fn additional_snippets_heading(&self) -> &'static str {
+        match self {
+            Language::English => "Additional snippets:",
+            Language::Chinese => "补充片段：",
+        }
+    }
+
+    fn hierarchical_budget_notice(&self) -> &'static str {
+        match self {
+            Language::English => "[Lower-priority diff details omitted to fit context.]",
+            Language::Chinese => "[为适配上下文，已省略较低优先级的 diff 细节。]",
         }
     }
 
@@ -421,8 +670,11 @@ fn get_diff() -> Result<String> {
 fn build_commit_prompt(diff: &str, language: &Language, attempt: usize) -> String {
     match language {
         Language::English => {
+            // `/no_think` disables Qwen3 thinking mode so the model returns only the commit line.
             let mut prompt = format!(
-                r#"SYSTEM: You are a commit message generator. You must output ONLY a commit message, nothing else.
+                r#"/no_think
+SYSTEM: You are a commit message generator. You must output ONLY a commit message, nothing else.
+Do not reason out loud. Do not emit <think> blocks or chain-of-thought.
 
 TASK: Analyze the git diff below and produce exactly ONE commit message in Conventional Commits format.
 
@@ -440,7 +692,7 @@ RULES:
 1. <type> MUST be one of: feat, fix, docs, style, refactor, test, chore
 2. <scope> is optional, use kebab-case when needed (e.g., cli, api, docs)
 3. <subject> is imperative, concise (<= 72 chars)
-4. NO explanations, NO markdown fences, NO extra text
+4. NO explanations, NO markdown fences, NO extra text, NO thinking
 5. Output ONLY the commit message, nothing else
 
 HERE IS THE DIFF:
@@ -451,15 +703,18 @@ YOUR OUTPUT (commit message only):"#
 
             if attempt > 0 {
                 prompt.push_str(
-                    "\n\nCRITICAL: Previous output was invalid. You MUST output ONLY a commit message starting with '<type>(<scope>): <subject>'. NO other text, explanations, or formatting.",
+                    "\n\n/no_think\nCRITICAL: Previous output was invalid. You MUST output ONLY a commit message starting with '<type>(<scope>): <subject>'. NO other text, explanations, thinking, or formatting.",
                 );
             }
 
             prompt
         }
         Language::Chinese => {
+            // `/no_think` 关闭 Qwen3 思考模式，避免输出 <think> 与冗长推理。
             let mut prompt = format!(
-                r#"系统：这是一个**任务指令**，不是对话。你的任务是直接生成提交信息，**不要回复或回应任何指令**。
+                r#"/no_think
+系统：这是一个**任务指令**，不是对话。你的任务是直接生成提交信息，**不要回复或回应任何指令**。
+不要思考过程，不要输出 <think> 块或链式推理。
 
 任务：分析以下 git diff，生成一个符合 Conventional Commits 规范的提交信息。
 
@@ -479,7 +734,7 @@ style(ui): 修改按钮颜色
 1. <类型> 必须是以下之一：feat、fix、docs、style、refactor、test、chore
 2. <范围> 可选，使用 kebab-case（如 cli、api、docs、ui）
 3. <主题> 使用祈使语气，简练（≤72 字符）
-4. **绝对不要**输出任何解释、对话、回复或额外文字
+4. **绝对不要**输出任何解释、对话、回复、思考过程或额外文字
 5. **首行**必须是：`<类型>(<范围>): <主题>`
 6. **不要**使用markdown、不添加代码块、不加符号
 
@@ -487,12 +742,12 @@ style(ui): 修改按钮颜色
 
 {diff}
 
-**请直接生成提交信息（不要任何回复或解释）：**"#
+**请直接生成提交信息（不要任何回复、解释或思考）：**"#
             );
 
             if attempt > 0 {
                 prompt.push_str(
-                    "\n\n**严重错误**：上次输出不符合格式！**立即停止回复和对话**，**必须**直接输出一个以 '<类型>(<范围>): <主题>' 开头的提交信息。**不要**说'好的'、'理解了'、'请重新试'等任何回复文字。",
+                    "\n\n/no_think\n**严重错误**：上次输出不符合格式！**立即停止回复、对话和思考**，**必须**直接输出一个以 '<类型>(<范围>): <主题>' 开头的提交信息。**不要**说'好的'、'理解了'、'请重新试'等任何回复文字。",
                 );
             }
 
@@ -638,10 +893,10 @@ fn is_commit_subject(line: &str) -> bool {
             return false;
         }
 
-        match lower.as_bytes().get(commit_type.len()) {
-            Some(b'(') | Some(b':') => true,
-            _ => false,
-        }
+        matches!(
+            lower.as_bytes().get(commit_type.len()),
+            Some(b'(') | Some(b':')
+        )
     })
 }
 
@@ -737,7 +992,9 @@ fn analyze_diff_summary(diff: &str) -> DiffSummary {
                     } else {
                         summary.docs_only = false;
                     }
-                    if ext == "rs" {
+                    // Dependency manifests/locks are not treated as application code for type inference.
+                    let is_deps_path = is_dependency_manifest_or_lock(&path);
+                    if is_code_extension(ext) && !is_deps_path {
                         summary.has_code = true;
                     }
 
@@ -747,11 +1004,11 @@ fn analyze_diff_summary(diff: &str) -> DiffSummary {
                     if path == "src/llama.rs" {
                         summary.has_llama = true;
                     }
-                    if path == "Cargo.toml" {
+                    if path == "Cargo.toml" || path.ends_with("/Cargo.toml") {
                         summary.has_cargo_toml = true;
                         summary.docs_only = false;
                     }
-                    if path == "Cargo.lock" {
+                    if path == "Cargo.lock" || path.ends_with("/Cargo.lock") {
                         summary.has_cargo_lock = true;
                         summary.docs_only = false;
                     }
@@ -791,20 +1048,314 @@ struct FileSection {
     path: String,
     additions: usize,
     deletions: usize,
-    snippet: Vec<String>,
+    /// L1: signatures, hunk headers, high-signal added/removed lines.
+    key_lines: Vec<String>,
+    /// L2: remaining diff body for secondary packing.
+    extra_lines: Vec<String>,
     omitted: bool,
+    is_new: bool,
 }
 
-fn build_diff_summary(diff: &str, language: &Language, context_size: i32) -> String {
-    const SNIPPET_LINE_LIMIT: usize = 120;
-    const PER_FILE_SNIPPET_LIMIT: usize = 1200;
-
-    let max_chars = (context_size as usize)
+fn prompt_diff_char_budget(context_size: i32) -> usize {
+    // Reserve tokens for the system prompt wrapper + short generation.
+    (context_size as usize)
+        .saturating_sub(384)
         .saturating_mul(3)
-        .saturating_sub(512)
-        .max(2048);
-    let diff_truncated = diff.len() > max_chars;
+        .max(2048)
+}
 
+fn is_code_extension(ext: &str) -> bool {
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "rs" | "ts"
+            | "tsx"
+            | "js"
+            | "jsx"
+            | "mjs"
+            | "cjs"
+            | "py"
+            | "go"
+            | "java"
+            | "kt"
+            | "kts"
+            | "swift"
+            | "c"
+            | "cc"
+            | "cpp"
+            | "cxx"
+            | "h"
+            | "hpp"
+            | "cs"
+            | "rb"
+            | "php"
+            | "vue"
+            | "svelte"
+            | "scala"
+            | "rsx"
+            | "zig"
+            | "lua"
+            | "sh"
+            | "bash"
+            | "zsh"
+            | "sql"
+            | "gradle"
+            | "dart"
+            | "r"
+            | "jl"
+    )
+}
+
+fn is_dependency_manifest_or_lock(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with("package.json")
+        || lower.ends_with("package-lock.json")
+        || lower.contains("pnpm-lock")
+        || lower.contains("yarn.lock")
+        || lower.ends_with("cargo.toml")
+        || lower.ends_with("cargo.lock")
+        || lower.ends_with("go.mod")
+        || lower.ends_with("go.sum")
+        || lower.ends_with("composer.json")
+        || lower.ends_with("composer.lock")
+        || lower.ends_with("pyproject.toml")
+        || lower.ends_with("poetry.lock")
+        || lower.ends_with("requirements.txt")
+        || lower.ends_with("gemfile")
+        || lower.ends_with("gemfile.lock")
+}
+
+fn is_key_diff_line(line: &str) -> bool {
+    if line.starts_with("@@") {
+        return true;
+    }
+
+    let is_change = (line.starts_with('+') && !line.starts_with("+++"))
+        || (line.starts_with('-') && !line.starts_with("---"));
+    if !is_change {
+        return false;
+    }
+
+    let content = line.get(1..).unwrap_or("").trim();
+    if content.is_empty() {
+        return false;
+    }
+
+    // Skip pure noise / imports-only churn for L1 packing priority.
+    if content.starts_with("//")
+        || content.starts_with('#')
+        || content.starts_with("/*")
+        || content.starts_with('*')
+        || content.starts_with("import ")
+        || content.starts_with("from ")
+        || content.starts_with("use ")
+        || content.starts_with("package ")
+    {
+        return false;
+    }
+
+    let lower = content.to_ascii_lowercase();
+    lower.contains("fn ")
+        || lower.contains("function ")
+        || lower.contains("def ")
+        || lower.contains("class ")
+        || lower.contains("struct ")
+        || lower.contains("interface ")
+        || lower.contains("impl ")
+        || lower.contains("export ")
+        || lower.contains("pub ")
+        || lower.starts_with("func ")
+        || lower.contains(" type ")
+        || lower.starts_with("type ")
+        || lower.contains("async ")
+        || lower.contains("const ")
+        || lower.contains("let ")
+        || lower.contains("var ")
+        || lower.contains("enum ")
+        || lower.contains("trait ")
+        || lower.contains("mod ")
+        || lower.contains("return ")
+        || lower.contains("throw ")
+        || lower.contains("error")
+        || lower.contains("fix")
+        || lower.contains("todo")
+        || lower.contains("config")
+        || lower.contains("route")
+        || lower.contains("api")
+}
+
+/// Hierarchical diff packing:
+/// - L0: file inventory (+/- counts)
+/// - L1: key signatures / high-signal hunks
+/// - L2: extra snippets from highest-churn files when budget remains
+fn build_diff_summary(diff: &str, language: &Language, context_size: i32) -> String {
+    build_hierarchical_diff_summary(diff, language, context_size, true)
+}
+
+fn build_hierarchical_diff_summary(
+    diff: &str,
+    language: &Language,
+    context_size: i32,
+    include_l2: bool,
+) -> String {
+    const PER_FILE_KEY_LINES: usize = 24;
+    const PER_FILE_EXTRA_LINES: usize = 80;
+    const PER_FILE_KEY_CHARS: usize = 900;
+    const PER_FILE_EXTRA_CHARS: usize = 1600;
+
+    let max_chars = prompt_diff_char_budget(context_size);
+    let mut sections = parse_diff_sections(diff);
+
+    if sections.is_empty() {
+        return diff.chars().take(diff.len().min(max_chars)).collect();
+    }
+
+    // Prefer high-churn, non-generated files when packing L1/L2.
+    sections.sort_by(|a, b| {
+        let score = |s: &FileSection| {
+            if s.omitted {
+                0usize
+            } else {
+                s.additions
+                    .saturating_add(s.deletions)
+                    .saturating_add(usize::from(s.is_new) * 3)
+            }
+        };
+        score(b).cmp(&score(a))
+    });
+
+    // L0 — always emit a compact inventory first.
+    let mut output = String::new();
+    output.push_str(language.changed_files_heading());
+    output.push('\n');
+    for section in &sections {
+        let mut notes = Vec::new();
+        if section.is_new {
+            notes.push("new");
+        }
+        if section.omitted {
+            notes.push(language.file_omitted_notice());
+        }
+        let note = if notes.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", notes.join(", "))
+        };
+        output.push_str(&format!(
+            "- {} (+{} / -{}){}\n",
+            section.path, section.additions, section.deletions, note
+        ));
+    }
+    output.push('\n');
+
+    let mut remaining = max_chars.saturating_sub(output.len());
+    let mut omitted_details = false;
+
+    // L1 — key changes.
+    let mut l1_body = String::new();
+    for section in &sections {
+        if section.omitted || section.key_lines.is_empty() {
+            continue;
+        }
+        if remaining < 64 {
+            omitted_details = true;
+            break;
+        }
+
+        let mut block = format!("{} {}\n", language.file_snippet_heading(), section.path);
+        let mut used_chars = 0usize;
+        let mut used_lines = 0usize;
+        for line in &section.key_lines {
+            if used_lines >= PER_FILE_KEY_LINES || used_chars + line.len() + 1 > PER_FILE_KEY_CHARS
+            {
+                break;
+            }
+            if block.len() + line.len() + 1 > remaining {
+                omitted_details = true;
+                break;
+            }
+            block.push_str(line);
+            block.push('\n');
+            used_chars += line.len() + 1;
+            used_lines += 1;
+        }
+        if used_lines == 0 {
+            omitted_details = true;
+            continue;
+        }
+        block.push('\n');
+        if block.len() > remaining {
+            omitted_details = true;
+            break;
+        }
+        remaining = remaining.saturating_sub(block.len());
+        l1_body.push_str(&block);
+    }
+
+    if !l1_body.is_empty() {
+        output.push_str(language.key_changes_heading());
+        output.push('\n');
+        output.push_str(&l1_body);
+        remaining = max_chars.saturating_sub(output.len());
+    }
+
+    // L2 — additional body from top churn files.
+    if include_l2 && remaining > 128 {
+        let mut l2_body = String::new();
+        for section in &sections {
+            if section.omitted || section.extra_lines.is_empty() {
+                continue;
+            }
+            if remaining < 64 {
+                omitted_details = true;
+                break;
+            }
+
+            let mut block = format!("{} {}\n", language.file_snippet_heading(), section.path);
+            let mut used_chars = 0usize;
+            let mut used_lines = 0usize;
+            for line in &section.extra_lines {
+                if used_lines >= PER_FILE_EXTRA_LINES
+                    || used_chars + line.len() + 1 > PER_FILE_EXTRA_CHARS
+                {
+                    break;
+                }
+                if block.len() + line.len() + 1 > remaining {
+                    omitted_details = true;
+                    break;
+                }
+                block.push_str(line);
+                block.push('\n');
+                used_chars += line.len() + 1;
+                used_lines += 1;
+            }
+            if used_lines == 0 {
+                continue;
+            }
+            block.push('\n');
+            if block.len() > remaining {
+                omitted_details = true;
+                break;
+            }
+            remaining = remaining.saturating_sub(block.len());
+            l2_body.push_str(&block);
+        }
+
+        if !l2_body.is_empty() {
+            output.push_str(language.additional_snippets_heading());
+            output.push('\n');
+            output.push_str(&l2_body);
+        }
+    }
+
+    if omitted_details || diff.len() > max_chars {
+        output.push_str(language.hierarchical_budget_notice());
+        output.push('\n');
+    }
+
+    output
+}
+
+fn parse_diff_sections(diff: &str) -> Vec<FileSection> {
     let mut sections: Vec<FileSection> = Vec::new();
     let mut current: Option<FileSection> = None;
 
@@ -832,14 +1383,12 @@ fn build_diff_summary(diff: &str, language: &Language, context_size: i32) -> Str
             continue;
         };
 
-        if line.starts_with("+++") || line.starts_with("---") {
+        if line.starts_with("new file mode") {
+            section.is_new = true;
             continue;
         }
 
-        if line.starts_with("@@") {
-            if !section.omitted && section.snippet.len() < SNIPPET_LINE_LIMIT {
-                section.snippet.push(line.to_string());
-            }
+        if line.starts_with("+++") || line.starts_with("---") {
             continue;
         }
 
@@ -853,83 +1402,26 @@ fn build_diff_summary(diff: &str, language: &Language, context_size: i32) -> Str
             continue;
         }
 
-        let snippet_chars: usize = section.snippet.iter().map(|l| l.len()).sum();
-        if section.snippet.len() >= SNIPPET_LINE_LIMIT || snippet_chars >= PER_FILE_SNIPPET_LIMIT {
-            section.omitted = true;
-            section.snippet.clear();
-            continue;
+        if is_key_diff_line(line) {
+            if section.key_lines.len() < 40 {
+                section.key_lines.push(line.to_string());
+            } else if section.extra_lines.len() < 120 {
+                section.extra_lines.push(line.to_string());
+            }
+        } else if ((line.starts_with('+') && !line.starts_with("+++"))
+            || (line.starts_with('-') && !line.starts_with("---"))
+            || line.starts_with(' '))
+            && section.extra_lines.len() < 120
+        {
+            section.extra_lines.push(line.to_string());
         }
-
-        section.snippet.push(line.to_string());
     }
 
     if let Some(section) = current.take() {
         sections.push(section);
     }
 
-    if sections.is_empty() {
-        return diff
-            .chars()
-            .take(diff.len().min(max_chars))
-            .collect::<String>();
-    }
-
-    let mut output = String::new();
-    output.push_str(language.changed_files_heading());
-    output.push('\n');
-
-    for section in &sections {
-        let note = if section.omitted {
-            format!(" {}", language.file_omitted_notice())
-        } else {
-            String::new()
-        };
-        output.push_str(&format!(
-            "- {} (+{} / -{}){}\n",
-            section.path, section.additions, section.deletions, note
-        ));
-    }
-
-    output.push('\n');
-
-    let mut remaining_chars = max_chars.saturating_sub(output.len());
-
-    for section in sections {
-        if section.omitted {
-            continue;
-        }
-        if remaining_chars <= 0 {
-            output.push_str(language.truncated_diff_notice());
-            output.push('\n');
-            break;
-        }
-
-        output.push_str(language.file_snippet_heading());
-        output.push(' ');
-        output.push_str(&section.path);
-        output.push('\n');
-
-        for line in section.snippet {
-            if line.len() + 1 > remaining_chars {
-                output.push_str(language.truncated_body_notice());
-                output.push('\n');
-                remaining_chars = 0;
-                break;
-            }
-            output.push_str(&line);
-            output.push('\n');
-            remaining_chars = remaining_chars.saturating_sub(line.len() + 1);
-        }
-
-        output.push('\n');
-    }
-
-    if diff_truncated && !output.contains(language.truncated_diff_notice()) {
-        output.push_str(language.truncated_diff_notice());
-        output.push('\n');
-    }
-
-    output
+    sections
 }
 
 fn is_generated_or_large_file(path: &str) -> bool {
@@ -938,15 +1430,17 @@ fn is_generated_or_large_file(path: &str) -> bool {
         || lower.contains("package-lock")
         || lower.contains("yarn.lock")
         || lower.contains("cargo.lock")
+        || lower.contains("composer.lock")
+        || lower.contains("poetry.lock")
+        || lower.contains("go.sum")
         || lower.ends_with(".min.js")
         || lower.ends_with(".min.css")
+        || lower.ends_with(".map")
+        || lower.ends_with(".lock")
 }
 
 fn build_diff_raw_tail(diff: &str, language: &Language, context_size: i32) -> String {
-    let max_chars = (context_size as usize)
-        .saturating_mul(3)
-        .saturating_sub(512)
-        .max(2048);
+    let max_chars = prompt_diff_char_budget(context_size);
 
     if diff.len() <= max_chars {
         return diff.to_string();
@@ -966,12 +1460,19 @@ fn build_diff_raw_tail(diff: &str, language: &Language, context_size: i32) -> St
 }
 
 fn build_diff_variants(diff: &str, language: &Language, context_size: i32) -> Vec<String> {
-    let summary = build_diff_summary(diff, language, context_size);
-    let raw = build_diff_raw_tail(diff, language, context_size);
-    if summary.trim() == raw.trim() {
-        vec![summary]
+    // Attempt 0: full hierarchical summary (L0+L1+L2).
+    let full = build_diff_summary(diff, language, context_size);
+    // Attempt 1: tighter view (L0+L1 only) for stricter retries.
+    let tight = build_hierarchical_diff_summary(diff, language, context_size, false);
+    if full.trim() == tight.trim() {
+        let raw = build_diff_raw_tail(diff, language, context_size);
+        if full.trim() == raw.trim() {
+            vec![full]
+        } else {
+            vec![full, raw]
+        }
     } else {
-        vec![summary, raw]
+        vec![full, tight]
     }
 }
 
@@ -1227,8 +1728,7 @@ fn is_valid_commit_message(message: &str, language: &Language) -> bool {
 
 fn parse_commit_subject(line: &str) -> Option<(&'static str, Option<&str>, &str)> {
     for commit_type in COMMIT_TYPES {
-        if line.starts_with(commit_type) {
-            let rest = &line[commit_type.len()..];
+        if let Some(rest) = line.strip_prefix(commit_type) {
             if rest.starts_with('(') {
                 let end = rest.find("):")?;
                 let scope = rest[1..end].trim();
@@ -1240,8 +1740,8 @@ fn parse_commit_subject(line: &str) -> Option<(&'static str, Option<&str>, &str)
                     return None;
                 }
                 return Some((commit_type, Some(scope), subject));
-            } else if rest.starts_with(':') {
-                let subject = rest[1..].trim();
+            } else if let Some(stripped) = rest.strip_prefix(':') {
+                let subject = stripped.trim();
                 if subject.is_empty() {
                     return None;
                 }
@@ -1301,7 +1801,7 @@ fn select_language(git_config: &mut GitConfig) -> Result<Language> {
     println!("2. 简体中文");
 
     let choice = loop {
-        let input = get_user_input(&current_lang.select_language_prompt())?;
+        let input = get_user_input(current_lang.select_language_prompt())?;
         match input.parse::<usize>() {
             Ok(1) => break Language::English,
             Ok(2) => break Language::Chinese,
@@ -1314,7 +1814,7 @@ fn select_language(git_config: &mut GitConfig) -> Result<Language> {
         "{}",
         choice
             .language_set_to()
-            .replace("{}", &choice.display_name())
+            .replace("{}", choice.display_name())
     );
     Ok(choice)
 }
@@ -1489,6 +1989,35 @@ fn find_local_models() -> Vec<PathBuf> {
     found
 }
 
+fn pick_gguf_filename<'a>(siblings: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    let mut fallback: Option<&str> = None;
+    let mut q4: Option<&str> = None;
+    let mut q4_k_m: Option<&str> = None;
+
+    for name in siblings {
+        let lower = name.to_ascii_lowercase();
+        if !lower.ends_with(".gguf") {
+            continue;
+        }
+        // Prefer instruction / it variants when multiple GGUFs exist.
+        let is_instruct =
+            lower.contains("instruct") || lower.contains("-it-") || lower.contains("_it_");
+        if fallback.is_none() || is_instruct {
+            fallback = Some(name);
+        }
+        if lower.contains("q4_k_m") {
+            q4_k_m = Some(name);
+            if is_instruct {
+                break;
+            }
+        } else if q4.is_none() && lower.contains("q4") {
+            q4 = Some(name);
+        }
+    }
+
+    q4_k_m.or(q4).or(fallback)
+}
+
 fn download_model_from_hub(repo_id: &str, language: &Language) -> Result<PathBuf> {
     let api = Api::new()
         .map_err(|e| AppError::Custom(format!("Failed to initialize Hugging Face client: {e}")))?;
@@ -1499,29 +2028,10 @@ fn download_model_from_hub(repo_id: &str, language: &Language) -> Result<PathBuf
         ))
     })?;
 
-    let mut fallback: Option<&str> = None;
-    let mut preferred: Option<&str> = None;
-
-    for sibling in &info.siblings {
-        let name = sibling.rfilename.as_str();
-        let lower = name.to_ascii_lowercase();
-        if !lower.ends_with(".gguf") {
-            continue;
-        }
-
-        if fallback.is_none() {
-            fallback = Some(name);
-        }
-
-        if lower.contains("q4") {
-            preferred = Some(name);
-            break;
-        }
-    }
-
-    let filename = preferred.or(fallback).ok_or_else(|| {
-        AppError::Custom(format!("No GGUF files found in repository '{repo_id}'"))
-    })?;
+    let filename = pick_gguf_filename(info.siblings.iter().map(|s| s.rfilename.as_str()))
+        .ok_or_else(|| {
+            AppError::Custom(format!("No GGUF files found in repository '{repo_id}'"))
+        })?;
 
     println!("{}", language.downloading_model().replace("{}", repo_id));
     let source_path = repo.get(filename).map_err(|e| {
@@ -1556,15 +2066,43 @@ fn download_model_from_hub(repo_id: &str, language: &Language) -> Result<PathBuf
     Ok(canonical)
 }
 
-fn ensure_default_model(language: &Language) -> Result<Option<PathBuf>> {
+fn print_hardware_profile(language: &Language, hardware: &HardwareProfile) {
+    println!("{}", language.hardware_profile_label());
+    match hardware.total_ram_mib {
+        Some(mib) => {
+            let gib = mib as f64 / 1024.0;
+            println!("  RAM: ~{gib:.1} GiB ({mib} MiB)");
+        }
+        None => println!("  RAM: unknown"),
+    }
+    println!(
+        "  {}",
+        language
+            .recommended_tier_label()
+            .replace("{}", hardware.recommended_tier.display_name())
+    );
+    println!(
+        "  {}",
+        language
+            .using_context_label()
+            .replace("{}", &hardware.recommended_context.to_string())
+    );
+}
+
+fn ensure_default_model(language: &Language, tier: ModelTier) -> Result<Option<PathBuf>> {
     if find_local_models().is_empty() {
+        let repo = tier.repo_id();
         println!(
             "{}",
             language
-                .auto_downloading_default()
-                .replace("{}", DEFAULT_MODEL_REPO)
+                .auto_selected_tier()
+                .replace("{}", tier.display_name())
         );
-        let downloaded = download_model_from_hub(DEFAULT_MODEL_REPO, language)?;
+        println!(
+            "{}",
+            language.auto_downloading_default().replace("{}", repo)
+        );
+        let downloaded = download_model_from_hub(repo, language)?;
         let canonical = fs::canonicalize(&downloaded).unwrap_or(downloaded);
         persist_model_path(&canonical);
         println!(
@@ -1579,7 +2117,7 @@ fn ensure_default_model(language: &Language) -> Result<Option<PathBuf>> {
     Ok(None)
 }
 
-fn get_model_path(language: &Language) -> Result<PathBuf> {
+fn get_model_path(language: &Language, tier: ModelTier) -> Result<PathBuf> {
     if let Some(stored) = load_persisted_model_path() {
         let expanded = expand_model_path(&stored);
         if expanded.is_file() && is_gguf(&expanded) {
@@ -1602,7 +2140,7 @@ fn get_model_path(language: &Language) -> Result<PathBuf> {
         }
     }
 
-    if let Some(downloaded) = ensure_default_model(language)? {
+    if let Some(downloaded) = ensure_default_model(language, tier)? {
         return Ok(downloaded);
     }
 
@@ -1610,7 +2148,7 @@ fn get_model_path(language: &Language) -> Result<PathBuf> {
     if models.is_empty() {
         println!("{}", language.no_default_model());
         println!("{}", language.model_pull_hint());
-        return select_model_path(language);
+        return select_model_path(language, tier);
     }
 
     if models.len() == 1 {
@@ -1625,11 +2163,28 @@ fn get_model_path(language: &Language) -> Result<PathBuf> {
         return Ok(canonical);
     }
 
-    select_model_path(language)
+    select_model_path(language, tier)
 }
 
-fn select_model_path(language: &Language) -> Result<PathBuf> {
+fn select_model_path(language: &Language, recommended_tier: ModelTier) -> Result<PathBuf> {
     println!("{}", language.fetching_models());
+    print_hardware_profile(language, &HardwareProfile::detect());
+
+    println!("\n{}", language.available_tiers());
+    for (idx, tier) in ModelTier::all().iter().enumerate() {
+        let marker = if *tier == recommended_tier {
+            " ← recommended"
+        } else {
+            ""
+        };
+        println!(
+            "  {}. {} — {} (~{} MiB Q4){marker}",
+            idx + 1,
+            tier.as_str(),
+            tier.repo_id(),
+            tier.approx_weight_mib()
+        );
+    }
 
     let models = find_local_models();
     if models.is_empty() {
@@ -1638,11 +2193,12 @@ fn select_model_path(language: &Language) -> Result<PathBuf> {
     } else {
         println!("{}", language.available_models());
         for (i, model) in models.iter().enumerate() {
-            println!("{}. {}", i + 1, model.display());
+            println!("  L{}. {}", i + 1, model.display());
         }
     }
 
     if !io::stdin().is_terminal() {
+        // Non-interactive: prefer an existing local model, else download recommended tier.
         if let Some(first) = models.first() {
             let canonical = fs::canonicalize(first).unwrap_or_else(|_| first.clone());
             persist_model_path(&canonical);
@@ -1654,13 +2210,16 @@ fn select_model_path(language: &Language) -> Result<PathBuf> {
             );
             return Ok(canonical);
         }
-        return Err(AppError::Custom(language.no_models_found().to_string()));
+        let downloaded = download_model_from_hub(recommended_tier.repo_id(), language)?;
+        let canonical = fs::canonicalize(&downloaded).unwrap_or(downloaded);
+        persist_model_path(&canonical);
+        return Ok(canonical);
     }
 
     println!("{}", language.enter_model_path_hint());
 
     loop {
-        let input = match get_user_input(&language.select_model_prompt()) {
+        let input = match get_user_input(language.select_tier_prompt()) {
             Ok(value) => value,
             Err(AppError::InputClosed) => {
                 if let Some(first) = models.first() {
@@ -1680,12 +2239,55 @@ fn select_model_path(language: &Language) -> Result<PathBuf> {
         };
         let trimmed = input.trim();
 
+        // Empty / Enter → download recommended tier.
         if trimmed.is_empty() {
-            println!("{}", language.invalid_selection());
-            continue;
+            let downloaded = download_model_from_hub(recommended_tier.repo_id(), language)?;
+            let canonical = fs::canonicalize(&downloaded).unwrap_or(downloaded);
+            persist_model_path(&canonical);
+            println!(
+                "{}",
+                language
+                    .model_set_as_default()
+                    .replace("{}", &canonical.to_string_lossy())
+            );
+            return Ok(canonical);
         }
 
+        // Tier by name or 1–3.
+        if let Some(tier) = ModelTier::from_str(trimmed) {
+            let downloaded = download_model_from_hub(tier.repo_id(), language)?;
+            let canonical = fs::canonicalize(&downloaded).unwrap_or(downloaded);
+            persist_model_path(&canonical);
+            println!(
+                "{}",
+                language
+                    .model_set_as_default()
+                    .replace("{}", &canonical.to_string_lossy())
+            );
+            return Ok(canonical);
+        }
         if let Ok(index) = trimmed.parse::<usize>() {
+            if (1..=3).contains(&index) {
+                let tier = ModelTier::all()[index - 1];
+                let downloaded = download_model_from_hub(tier.repo_id(), language)?;
+                let canonical = fs::canonicalize(&downloaded).unwrap_or(downloaded);
+                persist_model_path(&canonical);
+                println!(
+                    "{}",
+                    language
+                        .model_set_as_default()
+                        .replace("{}", &canonical.to_string_lossy())
+                );
+                return Ok(canonical);
+            }
+        }
+
+        // Local model: "L1", "l2", or bare index only when it matches local list uniquely after tiers.
+        let local_index = trimmed
+            .strip_prefix('L')
+            .or_else(|| trimmed.strip_prefix('l'))
+            .and_then(|rest| rest.parse::<usize>().ok());
+        if let Some(index) = local_index {
             if index > 0 && index <= models.len() {
                 let selected = fs::canonicalize(&models[index - 1])
                     .unwrap_or_else(|_| models[index - 1].clone());
@@ -1697,10 +2299,9 @@ fn select_model_path(language: &Language) -> Result<PathBuf> {
                         .replace("{}", &selected.to_string_lossy())
                 );
                 return Ok(selected);
-            } else {
-                println!("{}", language.invalid_selection());
-                continue;
             }
+            println!("{}", language.invalid_selection());
+            continue;
         }
 
         let candidate = expand_model_path(trimmed);
@@ -1871,10 +2472,130 @@ index 0000000..3333333
     #[test]
     fn truncates_diff_for_prompt() {
         let language = Language::English;
-        let long_diff = format!("diff --git a/file b/file\n{}", "a".repeat(5000));
+        let long_diff = format!(
+            "diff --git a/file b/file\n--- a/file\n+++ b/file\n@@\n+{}\n",
+            "a".repeat(5000)
+        );
         let prepared = build_diff_summary(&long_diff, &language, 512);
-        assert!(prepared.contains(language.truncated_diff_notice()));
+        assert!(
+            prepared.contains(language.hierarchical_budget_notice())
+                || prepared.contains(language.truncated_diff_notice())
+                || prepared.contains(language.changed_files_heading())
+        );
         assert!(prepared.len() < long_diff.len());
+    }
+
+    #[test]
+    fn hierarchical_summary_includes_l0_inventory() {
+        let language = Language::English;
+        let diff = "\
+diff --git a/src/api.ts b/src/api.ts
+--- a/src/api.ts
++++ b/src/api.ts
+@@
++export function login() { return true; }
+diff --git a/src/ui.tsx b/src/ui.tsx
+--- a/src/ui.tsx
++++ b/src/ui.tsx
+@@
++export const Button = () => null;
+";
+        let summary = build_diff_summary(diff, &language, 4096);
+        assert!(summary.contains(language.changed_files_heading()));
+        assert!(summary.contains("src/api.ts"));
+        assert!(summary.contains("src/ui.tsx"));
+        assert!(summary.contains(language.key_changes_heading()) || summary.contains("export"));
+    }
+
+    #[test]
+    fn hierarchical_retry_variant_can_drop_l2() {
+        let language = Language::English;
+        let mut body = String::new();
+        for i in 0..40 {
+            body.push_str(&format!("+const value_{i} = {i};\n"));
+        }
+        let diff = format!(
+            "diff --git a/src/lib.ts b/src/lib.ts\n--- a/src/lib.ts\n+++ b/src/lib.ts\n@@\n+export function main() {{}}\n{body}"
+        );
+        let variants = build_diff_variants(&diff, &language, 2048);
+        assert!(!variants.is_empty());
+        assert!(variants[0].contains(language.changed_files_heading()));
+    }
+
+    #[test]
+    fn model_tier_from_ram_thresholds() {
+        assert_eq!(ModelTier::from_total_ram_mib(4 * 1024), ModelTier::Small);
+        assert_eq!(ModelTier::from_total_ram_mib(8 * 1024), ModelTier::Default);
+        assert_eq!(ModelTier::from_total_ram_mib(32 * 1024), ModelTier::Quality);
+    }
+
+    #[test]
+    fn model_tier_parses_aliases() {
+        assert_eq!(ModelTier::from_str("small"), Some(ModelTier::Small));
+        assert_eq!(ModelTier::from_str("DEFAULT"), Some(ModelTier::Default));
+        assert_eq!(ModelTier::from_str("quality"), Some(ModelTier::Quality));
+        assert_eq!(ModelTier::from_str("0.6b"), Some(ModelTier::Small));
+        assert_eq!(ModelTier::from_str("1.7b"), Some(ModelTier::Default));
+        assert_eq!(ModelTier::from_str("4b"), Some(ModelTier::Quality));
+        assert_eq!(ModelTier::from_str("nope"), None);
+    }
+
+    #[test]
+    fn model_tier_uses_qwen3_repos() {
+        assert_eq!(ModelTier::Small.repo_id(), "Qwen/Qwen3-0.6B-GGUF");
+        assert_eq!(ModelTier::Default.repo_id(), "Qwen/Qwen3-1.7B-GGUF");
+        assert_eq!(ModelTier::Quality.repo_id(), "Qwen/Qwen3-4B-GGUF");
+    }
+
+    #[test]
+    fn commit_prompt_disables_qwen3_thinking() {
+        let prompt = build_commit_prompt("diff --git a/x b/x\n", &Language::English, 0);
+        assert!(prompt.starts_with("/no_think") || prompt.contains("/no_think"));
+        assert!(prompt.contains("NO thinking") || prompt.contains("Do not emit <think>"));
+
+        let retry = build_commit_prompt("diff --git a/x b/x\n", &Language::English, 1);
+        assert!(retry.matches("/no_think").count() >= 2);
+
+        let zh = build_commit_prompt("diff --git a/x b/x\n", &Language::Chinese, 0);
+        assert!(zh.contains("/no_think"));
+    }
+
+    #[test]
+    fn detects_code_extensions_beyond_rust() {
+        assert!(is_code_extension("ts"));
+        assert!(is_code_extension("py"));
+        assert!(is_code_extension("go"));
+        assert!(!is_code_extension("md"));
+    }
+
+    #[test]
+    fn key_diff_line_prefers_signatures() {
+        assert!(is_key_diff_line("@@ -1,2 +1,3 @@"));
+        assert!(is_key_diff_line("+export function login() {}"));
+        assert!(is_key_diff_line("+pub fn analyze_diff() {}"));
+        assert!(!is_key_diff_line("+import foo from 'bar';"));
+        assert!(!is_key_diff_line(" context only"));
+    }
+
+    #[test]
+    fn pick_gguf_prefers_q4_k_m() {
+        let names = [
+            "model-q8_0.gguf",
+            "model-q4_0.gguf",
+            "model-q4_k_m.gguf",
+            "readme.md",
+        ];
+        assert_eq!(
+            pick_gguf_filename(names.into_iter()),
+            Some("model-q4_k_m.gguf")
+        );
+    }
+
+    #[test]
+    fn clamp_context_respects_low_ram() {
+        assert_eq!(clamp_context_size(16384, Some(4 * 1024)), 4096);
+        assert_eq!(clamp_context_size(16384, Some(10 * 1024)), 8192);
+        assert!(clamp_context_size(8192, Some(32 * 1024)) >= 8192);
     }
 }
 
@@ -1888,22 +2609,49 @@ fn main() -> Result<()> {
 
     let mut git_config = GitConfig::new()?;
     let language = get_language(&git_config);
+    let hardware = HardwareProfile::detect();
+    let model_tier = resolve_model_tier(&git_config, &hardware);
+    let context_size = resolve_context_size(&git_config, &hardware);
 
     if args.len() > 1 {
         match args[1].as_str() {
             "doctor" => {
-                run_doctor(&language)?;
+                run_doctor(&language, &hardware, model_tier, context_size)?;
                 return Ok(());
             }
             "model" => {
                 if args.len() > 2 && args[2] == "pull" {
-                    if args.len() < 4 {
-                        println!("{}", language.model_pull_usage());
-                        return Ok(());
-                    }
-                    let repo_id = &args[3];
-                    let downloaded = download_model_from_hub(repo_id, &language)?;
+                    let (repo_id, tier_for_config) = match args.get(3).map(|s| s.as_str()) {
+                        None => {
+                            // Auto-select from hardware.
+                            println!(
+                                "{}",
+                                language
+                                    .auto_selected_tier()
+                                    .replace("{}", hardware.recommended_tier.display_name())
+                            );
+                            (
+                                hardware.recommended_tier.repo_id().to_string(),
+                                Some(hardware.recommended_tier),
+                            )
+                        }
+                        Some(arg) => {
+                            if let Some(tier) = ModelTier::from_str(arg) {
+                                (tier.repo_id().to_string(), Some(tier))
+                            } else {
+                                (arg.to_string(), None)
+                            }
+                        }
+                    };
+                    let downloaded = download_model_from_hub(&repo_id, &language)?;
                     persist_model_path(&downloaded);
+                    if let Some(tier) = tier_for_config {
+                        let _ = git_config.set(CONFIG_MODEL_TIER_KEY, tier.as_str());
+                        println!(
+                            "{}",
+                            language.tier_persisted().replace("{}", tier.display_name())
+                        );
+                    }
                     println!(
                         "{}",
                         language
@@ -1912,7 +2660,7 @@ fn main() -> Result<()> {
                     );
                     return Ok(());
                 } else {
-                    select_model_path(&language)?;
+                    select_model_path(&language, model_tier)?;
                     return Ok(());
                 }
             }
@@ -1924,7 +2672,7 @@ fn main() -> Result<()> {
         }
     }
 
-    let model_path = get_model_path(&language)?;
+    let model_path = get_model_path(&language, model_tier)?;
 
     let current_dir = env::current_dir()?;
     let repo_path = find_git_repository(&current_dir)
@@ -1942,7 +2690,12 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let context_size = DEFAULT_CONTEXT_SIZE;
+    println!(
+        "{}",
+        language
+            .using_context_label()
+            .replace("{}", &context_size.to_string())
+    );
     let mut commit_msg = match analyze_diff(&diff, &model_path, &language, context_size)? {
         Some(msg) => msg,
         None => {
@@ -1952,19 +2705,19 @@ fn main() -> Result<()> {
                 fallback
             } else {
                 println!("{}", language.model_failed_generate());
-                get_user_input(&language.enter_commit_message())?
+                get_user_input(language.enter_commit_message())?
             }
         }
     };
 
     if io::stdin().is_terminal() {
         loop {
-            let choice = get_user_input(&language.use_edit_cancel_prompt())?;
+            let choice = get_user_input(language.use_edit_cancel_prompt())?;
 
             match choice.to_lowercase().as_str() {
                 "u" => break,
                 "e" => {
-                    commit_msg = get_user_input(&language.enter_commit_message())?;
+                    commit_msg = get_user_input(language.enter_commit_message())?;
                     break;
                 }
                 "c" => {
@@ -1979,8 +2732,8 @@ fn main() -> Result<()> {
         println!("\n[git-ca] Non-interactive mode detected. Using generated commit message.");
     }
 
-    let name = git_config.get_or_prompt("user.name", &language.enter_name_prompt())?;
-    let email = git_config.get_or_prompt("user.email", &language.enter_email_prompt())?;
+    let name = git_config.get_or_prompt("user.name", language.enter_name_prompt())?;
+    let email = git_config.get_or_prompt("user.email", language.enter_email_prompt())?;
 
     let signature = Signature::now(&name, &email)?;
     let tree_id = index.write_tree()?;
@@ -2018,14 +2771,29 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_doctor(language: &Language) -> Result<()> {
+fn run_doctor(
+    language: &Language,
+    hardware: &HardwareProfile,
+    model_tier: ModelTier,
+    context_size: i32,
+) -> Result<()> {
     println!("Running llama.cpp smoke test…");
+    print_hardware_profile(language, hardware);
+    println!(
+        "Active model tier: {} ({})",
+        model_tier.display_name(),
+        model_tier.repo_id()
+    );
 
-    let context_size = DEFAULT_CONTEXT_SIZE;
-    let model_path = get_model_path(language)?;
+    let model_path = get_model_path(language, model_tier)?;
 
     println!("Using model: {}", model_path.to_string_lossy());
-    println!("Context length: {}", context_size);
+    println!(
+        "{}",
+        language
+            .using_context_label()
+            .replace("{}", &context_size.to_string())
+    );
 
     let mut session = LlamaSession::new(&model_path, context_size).map_err(AppError::from)?;
 

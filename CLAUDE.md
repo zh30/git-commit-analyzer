@@ -32,19 +32,29 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 - Handles user interactions for commit confirmation
 
 **2. Model Management (src/main.rs)**
+- Hardware probe (`detect_total_memory_mib`) recommends a tier:
+  - `small` → `Qwen/Qwen3-0.6B-GGUF` (~4K ctx)
+  - `default` → `Qwen/Qwen3-1.7B-GGUF` (~8K ctx)
+  - `quality` → `Qwen/Qwen3-4B-GGUF` (~16K ctx)
+  - Prompts prefix `/no_think` to disable Qwen3 thinking mode
+- Git config overrides: `commit-analyzer.model-tier`, `commit-analyzer.context`
 - Scans default directories for GGUF files:
   - `./models` (project directory)
   - `~/.cache/git-ca/models` (Linux)
   - `~/.local/share/git-ca/models` (Linux alt)
   - `~/Library/Application Support/git-ca/models` (macOS)
-- Downloads default model (`unsloth/gemma-3-270m-it-GGUF`) from Hugging Face if none found
+- Downloads recommended-tier Q4 GGUF from Hugging Face if none found
 - Persists selection to `~/.cache/git-ca/default-model.path` or `.git-ca/default-model.path`
+- CLI: `git ca model pull [small|default|quality|<repo>]`
 
 **3. Diff Processing (src/main.rs)**
 - **Retrieval**: `get_diff()` - uses `git diff --cached` to get staged changes
 - **Analysis**: `analyze_diff_summary()` - parses diff to extract file types, scope candidates, detect patterns
-- **Summarization**: `build_diff_summary()` - reduces large diffs to concise summaries with snippets
-- **Variants**: `build_diff_variants()` - creates summary and raw variants for retry attempts
+- **Hierarchical summarization** (`build_hierarchical_diff_summary`):
+  - L0: file inventory with +/- counts
+  - L1: key signatures / high-signal hunks (budget-first)
+  - L2: additional snippets from high-churn files when budget remains
+- **Variants**: `build_diff_variants()` - full hierarchy then L0+L1-only (or raw tail) for retries
 
 **4. Prompt Engineering (src/main.rs)**
 - Builds language-specific prompts (English/Chinese)
@@ -55,9 +65,9 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 **5. Model Inference (src/llama.rs)**
 - **Session Management**: `LlamaSession::new()` - loads GGUF model, initializes context
 - **Tokenization**: Handles prompt encoding with buffer resizing
-- **Generation**: Token-by-token sampling with temperature/top-k/top-p
+- **Generation**: Token-by-token sampling with temperature 0.3 / top-k / top-p (stable structured output)
 - **Chunked Decoding**: Processes long prompts in 256-token chunks
-- **Context Management**: Clears KV cache between runs, respects 1024-token limit
+- **Context Management**: Clears KV cache between runs; adaptive n_ctx (4K–16K typical); n_batch capped at 512
 
 **6. Response Processing (src/main.rs)**
 - Strips `<thinking>` blocks if present
@@ -119,7 +129,7 @@ cargo run -- git ca doctor
 
 # Select or download model
 cargo run -- git ca model
-cargo run -- git ca model pull unsloth/gemma-3-270m-it-GGUF
+cargo run -- git ca model pull default
 
 # Change language
 cargo run -- git ca language
@@ -134,18 +144,20 @@ cargo test handles_extracts_subject_line
 ## Configuration
 
 - `commit-analyzer.language` — Prompt language (`en`, `zh`)
-- **Llama context length**: Fixed to 1024 tokens (`DEFAULT_CONTEXT_SIZE`)
+- `commit-analyzer.model-tier` — `small` | `default` | `quality` (optional; auto from RAM when unset)
+- `commit-analyzer.context` — Override llama context tokens (clamped by RAM heuristics)
+- **Llama context length**: Adaptive (typically 4096 / 8192 / 16384 by tier + RAM)
 - **Model persistence**: Paths stored in `~/.cache/git-ca/default-model.path` or `.git-ca/default-model.path`
-- **Sampling parameters**: Temperature 0.8, Top-K 40, Top-P 0.9, Min-P 0.0
+- **Sampling parameters**: Temperature 0.3, Top-K 40, Top-P 0.9, Min-P 0.0
 
 ## Critical Implementation Details
 
-**Diff Summarization Strategy**:
-1. Identifies generated/large files (lockfiles, minified JS/CSS)
-2. Extracts file metadata: additions, deletions, file type
-3. Includes code snippets up to 120 lines or 1200 characters per file
-4. Truncates when approaching context limit (3× context - 512 chars)
-5. Marks omitted content with notices
+**Diff Summarization Strategy** (hierarchical):
+1. L0 inventory of every changed path with +/- counts (always first)
+2. Marks generated/large files (lockfiles, minified JS/CSS, source maps) as content-omitted
+3. L1 packs high-signal lines (hunk headers, signatures, API/error-ish changes)
+4. L2 fills remaining budget from high-churn files
+5. Char budget ≈ `(context - 384) * 3`, sorted by churn so multi-file commits stay useful
 
 **Model Sampling**:
 1. Retrieves logits from llama.cpp
@@ -156,9 +168,10 @@ cargo test handles_extracts_subject_line
 6. Prevents EOS tokens until meaningful text generated
 
 **Context Management**:
-- Fixed 1024-token context window
+- Adaptive context (tier + RAM; overridable via git config)
+- Batch size capped at 512 for low-end memory safety
 - Prompts truncated if exceeding `n_ctx - 32`
-- Raw diff tail used as fallback variant
+- Retry uses tighter L0+L1 hierarchy (or raw tail)
 - KV cache cleared between inferences
 
 ## Architecture Decisions

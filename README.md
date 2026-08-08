@@ -13,7 +13,8 @@ messages when needed.
 ## Key Features
 
 - **Local inference**: Uses `llama_cpp_sys_2` to run GGUF models without any remote API calls.
-- **Smart diff summarisation**: Large lockfiles and generated assets are reduced to concise summaries before prompting.
+- **Any-device model tiers**: Auto-selects small / default / quality Qwen3 GGUFs from system memory (4K–16K context; `/no_think` for fast structured output).
+- **Hierarchical diff packing**: Multi-file commits keep an inventory + key signatures before filling leftover budget with snippets.
 - **Conventional Commits validation**: Ensures responses match `<type>(<scope>): <subject>` and retries/falls back when they don't.
 - **Interactive CLI**: Review, edit, or cancel the generated commit message.
 - **Multi-language prompts**: English (default) and Simplified Chinese.
@@ -22,7 +23,7 @@ messages when needed.
 ## Requirements
 
 - Git 2.30+
-- A local GGUF model (the CLI can download the default `unsloth/gemma-3-270m-it-GGUF`)
+- A local GGUF model (the CLI can auto-download a Qwen3 tier from Hugging Face)
 
 ## Installation
 
@@ -88,19 +89,24 @@ bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
 
 On first run the CLI will:
 
-1. **Scan for models** in common directories:
+1. **Probe system memory** and recommend a model tier:
+   - `small` (Qwen3-0.6B) — low-RAM / older machines, ~4K context
+   - `default` (Qwen3-1.7B) — balanced, ~8K context
+   - `quality` (Qwen3-4B) — higher quality when memory allows, ~16K context
+
+2. **Scan for models** in common directories:
    - `./models` (project directory)
    - `~/.cache/git-ca/models` (Linux/macOS)
    - `~/.local/share/git-ca/models` (Linux alt)
    - `~/Library/Application Support/git-ca/models` (macOS)
 
-2. **Download default model** automatically if none found:
-   - Downloads `unsloth/gemma-3-270m-it-GGUF` from Hugging Face
-   - Stores it in `~/.cache/git-ca/models/`
+3. **Download a tier model** automatically if none found (Q4 GGUF from Hugging Face into `~/.cache/git-ca/models/`).
 
-3. **Prompt for confirmation** if multiple models are found:
+4. **Prompt interactively** when multiple models/tiers are available:
    ```bash
-   git ca model  # Interactive model selector
+   git ca model              # Interactive selector (tiers + local GGUFs)
+   git ca model pull         # Auto-download recommended tier
+   git ca model pull quality # Force a specific tier
    ```
 
 ## Usage
@@ -112,17 +118,25 @@ git ca
 
 For each invocation:
 
-1. The staged diff is summarised (lockfiles and large assets are listed but not inlined).
+1. The staged diff is packed hierarchically (file inventory → key signatures → extra snippets) to fit the adaptive context window.
 2. The llama.cpp model generates a commit message.
-3. Invalid output triggers a stricter retry; if still invalid, a deterministic fallback is offered.
+3. Invalid output triggers a stricter retry with a tighter diff view; if still invalid, a deterministic fallback is offered.
 4. Choose to **use**, **edit**, or **cancel** the message.
 
 ### Configuration Commands
 
-- `git ca model` — Interactive model selector
+- `git ca model` — Interactive model / tier selector
+- `git ca model pull [small|default|quality|<repo>]` — Download a tier or custom HF GGUF repo
 - `git ca language` — Choose English or Simplified Chinese prompts
-- `git ca doctor` — Test model loading and inference
+- `git ca doctor` — Hardware profile + model loading smoke test
 - `git ca --version` — Display version information
+
+Optional git config overrides:
+
+```bash
+git config --global commit-analyzer.model-tier default   # small | default | quality
+git config --global commit-analyzer.context 8192         # token context length
+```
 
 ## Development
 

@@ -16,10 +16,13 @@ use std::sync::Once;
 
 const MAX_SEQ_ID: i32 = 1;
 const PROMPT_CHUNK_SIZE: usize = 256;
-const SAMPLING_TEMPERATURE: f32 = 0.8;
+// Structured commit messages need stability more than creativity.
+const SAMPLING_TEMPERATURE: f32 = 0.3;
 const SAMPLING_TOP_K: usize = 40;
 const SAMPLING_TOP_P: f32 = 0.9;
 const SAMPLING_MIN_P: f32 = 0.0;
+// Cap batch size so large contexts stay memory-friendly on low-end machines.
+const MAX_BATCH_SIZE: u32 = 512;
 const TOKEN_PIECE_INITIAL: usize = 64;
 const TOKEN_PIECE_MAX: usize = 8192;
 
@@ -80,8 +83,9 @@ impl LlamaSession {
 
             let mut ctx_params = llama_context_default_params();
             ctx_params.n_ctx = n_ctx as u32;
-            ctx_params.n_batch = n_ctx as u32;
-            ctx_params.n_ubatch = n_ctx as u32;
+            let batch = (n_ctx as u32).clamp(1, MAX_BATCH_SIZE);
+            ctx_params.n_batch = batch;
+            ctx_params.n_ubatch = batch;
             ctx_params.n_seq_max = MAX_SEQ_ID as u32;
 
             let threads = std::thread::available_parallelism()

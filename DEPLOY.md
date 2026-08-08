@@ -178,10 +178,10 @@ Configure these secrets in GitHub repository settings:
 
 ## 6. Model Distribution Notes
 
-No changes to model distribution - the CLI still:
-- Defaults to downloading `unsloth/gemma-3-270m-it-GGUF` from Hugging Face
+Model distribution notes:
+- Hardware tiers download Qwen3 GGUFs (`0.6B` / `1.7B` / `4B`) from Hugging Face
 - Supports local GGUF files in `./models` or `~/.cache/git-ca/models`
-- Uses llama.cpp (via `llama-cpp-sys-2`) for local inference
+- Uses llama.cpp (via `llama-cpp-sys-2`) for local inference with adaptive context
 
 ## 7. Post-release Verification
 

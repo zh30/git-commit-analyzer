@@ -7,7 +7,8 @@ Git 提交分析器是一个基于 Rust 的 Git 插件，利用本地 llama.cpp 
 ## 功能特性
 
 - **本地推理**：通过 `llama_cpp_sys_2` 调用 GGUF 模型，无需远程 API。
-- **智能 diff 摘要**：锁文件、生成物等大文件仅展示概要，避免浪费 Token。
+- **多档位自适应**：按内存自动选择 small / default / quality（Qwen3 GGUF，约 4K–16K 上下文；prompt 带 `/no_think`）。
+- **分层 diff 打包**：多文件提交先给文件清单与关键签名，再按预算填充片段。
 - **Conventional Commits 校验**：严格要求 `<type>(<scope>): <subject>`，失败时自动重试或兜底。
 - **交互式 CLI**：支持直接使用、编辑或取消生成的提交说明。
 - **多语言提示**：提供英文（默认）和简体中文两种提示语言。
@@ -16,7 +17,7 @@ Git 提交分析器是一个基于 Rust 的 Git 插件，利用本地 llama.cpp 
 ## 环境要求
 
 - Git ≥ 2.30
-- 一个本地 GGUF 模型（CLI 可自动下载默认模型 `unsloth/gemma-3-270m-it-GGUF`）
+- 一个本地 GGUF 模型（CLI 可按硬件档位自动下载 Qwen3 Q4）
 
 ## 安装方式
 
@@ -71,19 +72,24 @@ bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
 
 首次运行 CLI 会执行以下步骤：
 
-1. **扫描模型** 在常用目录：
+1. **探测系统内存**并推荐模型档位：
+   - `small`（Qwen3-0.6B）— 低内存 / 老机器，约 4K 上下文
+   - `default`（Qwen3-1.7B）— 均衡，约 8K 上下文
+   - `quality`（Qwen3-4B）— 内存充足时更高质量，约 16K 上下文
+
+2. **扫描模型** 在常用目录：
    - `./models`（项目目录）
    - `~/.cache/git-ca/models`（Linux/macOS）
    - `~/.local/share/git-ca/models`（Linux 备用）
    - `~/Library/Application Support/git-ca/models`（macOS）
 
-2. **自动下载默认模型**（如果未找到）：
-   - 从 Hugging Face 下载 `unsloth/gemma-3-270m-it-GGUF`
-   - 存储至 `~/.cache/git-ca/models/`
+3. **自动下载档位模型**（如果未找到）：从 Hugging Face 拉取 Q4 GGUF 到 `~/.cache/git-ca/models/`
 
-3. **交互式选择**（如果找到多个模型）：
+4. **交互式选择**（多模型 / 多档位时）：
    ```bash
-   git ca model  # 交互式模型选择器
+   git ca model              # 交互选择（档位 + 本地 GGUF）
+   git ca model pull         # 自动下载推荐档位
+   git ca model pull quality # 强制指定档位
    ```
 
 ## 使用说明
@@ -95,17 +101,25 @@ git ca
 
 每次调用的流程：
 
-1. 对已暂存 diff 进行摘要（大型文件仅展示概要）。
+1. 对已暂存 diff 做分层打包（文件清单 → 关键签名 → 补充片段），适配自适应上下文。
 2. llama.cpp 模型生成提交说明。
-3. 若输出不符合规范，使用更严格提示重试；仍失败则给出兜底信息。
+3. 若输出不符合规范，用更紧凑的 diff 视图 + 更严提示重试；仍失败则兜底。
 4. 交互式选择 **使用**、**编辑** 或 **取消**。
 
 ### 配置命令
 
-- `git ca model` — 交互式模型选择器
+- `git ca model` — 交互式模型 / 档位选择器
+- `git ca model pull [small|default|quality|<仓库>]` — 下载档位或自定义 HF 仓库
 - `git ca language` — 选择英文或简体中文提示
-- `git ca doctor` — 测试模型加载和推理
+- `git ca doctor` — 硬件概况 + 模型加载烟测
 - `git ca --version` — 显示版本信息
+
+可选 Git 配置：
+
+```bash
+git config --global commit-analyzer.model-tier default   # small | default | quality
+git config --global commit-analyzer.context 8192         # token 上下文长度
+```
 
 ## 开发指引
 
