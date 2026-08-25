@@ -2,13 +2,18 @@
 
 [中文](README_ZH.md) · [Français](README_FR.md) · [Español](README_ES.md)
 
-Git Commit Analyzer is a Rust-based Git plugin that generates Git Flow–style commit messages from your staged diff using a local llama.cpp model. The CLI summarises large diffs, validates model output, and falls back to deterministic messages when needed.
+Git Commit Analyzer is a Rust-based Git plugin that generates Conventional Commits-compatible `type(scope): subject` messages from your staged diff using a local llama.cpp model. The CLI summarises large diffs, validates model output, and falls back to deterministic messages when needed. Git Flow is a separate branch workflow and is not what this CLI generates.
+
+## Official links
+
+- Website: https://zhanghe.dev/products/git-commit-analyzer
+- Releases: https://github.com/zh30/git-commit-analyzer/releases
 
 ## Key Features
 
 - **Local inference**: Uses `llama_cpp_sys_2` to run GGUF models without any remote API calls.
 - **Smart diff summarisation**: Large lockfiles and generated assets are reduced to concise summaries before prompting.
-- **Git Flow enforcement**: Ensures responses match `<type>(<scope>): <subject>` and retries/falls back when they don't.
+- **Conventional Commits enforcement**: Ensures responses match `<type>(<scope>): <subject>` and retries/falls back when they don't.
 - **Interactive CLI**: Review, edit, or cancel the generated commit message.
 - **Multi-language prompts**: English (default) and Simplified Chinese.
 - **Multi-platform support**: Pre-built binaries for macOS (Intel & Apple Silicon).
