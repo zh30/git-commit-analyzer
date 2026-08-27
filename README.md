@@ -6,7 +6,7 @@ Git Commit Analyzer is a Rust-based Git plugin that generates Conventional Commi
 
 ## Official links
 
-- Website: https://zhanghe.dev/products/git-commit-analyzer
+- Official website: https://zhanghe.dev/products/git-commit-analyzer
 - Releases: https://github.com/zh30/git-commit-analyzer/releases
 
 ## Key Features
