@@ -12,8 +12,20 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 const CONFIG_LANGUAGE_KEY: &str = "commit-analyzer.language";
 const COMMIT_TYPES: &[&str] = &["feat", "fix", "docs", "style", "refactor", "test", "chore"];
-const DEFAULT_MODEL_REPO: &str = "unsloth/gemma-3-270m-it-GGUF";
-const DEFAULT_CONTEXT_SIZE: i32 = 1024;
+const DEFAULT_MODEL_REPO: &str = "marzoukbaig14/committed-gguf-0.6b";
+const DEFAULT_MODEL_FILE: &str = "committed-0.6b-finetuned-Q4_K_M.gguf";
+const DEFAULT_CONTEXT_SIZE: i32 = 4096;
+
+// Constrains generation to `type(scope)?: subject` so the commit line is
+// well-formed by construction. `type` is limited to COMMIT_TYPES, which is
+// narrower than the committed model's trained codebook (it also knows
+// perf/build/ci) — the grammar resolves that mismatch at decode time.
+const COMMIT_GRAMMAR: &str = r#"
+root        ::= type scope? ": " description
+type        ::= "feat" | "fix" | "docs" | "style" | "refactor" | "test" | "chore"
+scope       ::= "(" [a-zA-Z0-9_./-]+ ")"
+description ::= [^ \t\n.] ([^\n]* [^ \t\n.])?
+"#;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Language {
@@ -418,7 +430,59 @@ fn get_diff() -> Result<String> {
     Ok(diff)
 }
 
-fn build_commit_prompt(diff: &str, language: &Language, attempt: usize) -> String {
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PromptKind {
+    /// Qwen3-based model fine-tuned for Conventional Commits (the bundled
+    /// default). Needs its training-time rendering: ChatML template, a fixed
+    /// system instruction, `Diff:\n{diff}` user content, `/no_think`.
+    Committed,
+    /// Any other GGUF the user picked; gets the generic plain-text prompt.
+    Legacy,
+}
+
+fn prompt_kind_for(model_path: &Path) -> PromptKind {
+    let is_committed = model_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_ascii_lowercase().contains("committed"))
+        .unwrap_or(false);
+    if is_committed {
+        PromptKind::Committed
+    } else {
+        PromptKind::Legacy
+    }
+}
+
+// Verbatim system instruction the committed model was trained on (see
+// marzoukbaig14/Committed src/committed/inference/prompt.py). Keep it exact:
+// the fine-tune's reliability depends on matching its training-time prompt.
+const COMMITTED_SYSTEM_INSTRUCTION: &str = r#"You write a single Conventional Commits message describing a git diff.
+Pick the type that best matches what changed:
+feat — adds a capability; fix — corrects a bug; docs — documentation only; style — formatting with no change in logic; refactor — restructures code without changing behavior; perf — improves performance; test — adds or fixes tests; build — build system or dependencies; ci — CI configuration; chore — maintenance touching neither source nor tests.
+Add a scope in parentheses only when a single file or area clearly owns the change; if the change is spread out or the owner is unclear, omit it.
+Write the description so that:
+- It reads correctly after "If applied, this commit will…" — imperative verb first ("add", never "adds" or "added").
+- It states only what the diff shows. You can see what changed, not why, so never invent a reason, motivation, or outcome the diff doesn't contain; when unsure, say less rather than guess.
+- It names the most significant change when the diff touches several things.
+- It is specific: name the real function, file, flag, or endpoint, and skip filler verbs ("update", "change") and vague objects ("code", "stuff") when something precise fits."#;
+
+fn build_commit_prompt(
+    diff: &str,
+    language: &Language,
+    attempt: usize,
+    kind: PromptKind,
+) -> String {
+    if kind == PromptKind::Committed {
+        let mut system = COMMITTED_SYSTEM_INSTRUCTION.to_string();
+        if matches!(language, Language::Chinese) {
+            system.push_str("\nWrite the description in Simplified Chinese; keep the type and scope in English.");
+        }
+        let prompt = format!(
+            "<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\nDiff:\n{diff}\n\n/no_think<|im_end|>\n<|im_start|>assistant\n"
+        );
+        return prompt;
+    }
+
     match language {
         Language::English => {
             let mut prompt = format!(
@@ -513,15 +577,17 @@ fn analyze_diff(
     let mut session = LlamaSession::new(model_path, context_size).map_err(AppError::from)?;
     const MAX_ATTEMPTS: usize = 2;
 
-    let diff_variants = build_diff_variants(diff, language, context_size);
+    let prompt_kind = prompt_kind_for(model_path);
+    let diff_variants = build_diff_variants(diff, language, context_size, prompt_kind);
+    let grammar = (prompt_kind == PromptKind::Committed).then_some(COMMIT_GRAMMAR);
 
     for attempt in 0..MAX_ATTEMPTS {
         let fragment = diff_variants
             .get(attempt)
             .or_else(|| diff_variants.last())
             .unwrap();
-        let prompt = build_commit_prompt(fragment, language, attempt);
-        let response = match session.infer(&prompt, 256) {
+        let prompt = build_commit_prompt(fragment, language, attempt, prompt_kind);
+        let response = match session.infer(&prompt, 256, grammar) {
             Ok(output) => output,
             Err(err) => {
                 eprintln!("{err}");
@@ -638,10 +704,10 @@ fn is_commit_subject(line: &str) -> bool {
             return false;
         }
 
-        match lower.as_bytes().get(commit_type.len()) {
-            Some(b'(') | Some(b':') => true,
-            _ => false,
-        }
+        matches!(
+            lower.as_bytes().get(commit_type.len()),
+            Some(b'(') | Some(b':')
+        )
     })
 }
 
@@ -898,7 +964,7 @@ fn build_diff_summary(diff: &str, language: &Language, context_size: i32) -> Str
         if section.omitted {
             continue;
         }
-        if remaining_chars <= 0 {
+        if remaining_chars == 0 {
             output.push_str(language.truncated_diff_notice());
             output.push('\n');
             break;
@@ -965,13 +1031,43 @@ fn build_diff_raw_tail(diff: &str, language: &Language, context_size: i32) -> St
     format!("{}\n\n{}", language.truncated_diff_notice(), trimmed)
 }
 
-fn build_diff_variants(diff: &str, language: &Language, context_size: i32) -> Vec<String> {
+fn build_diff_raw_head(diff: &str, language: &Language, context_size: i32) -> String {
+    let max_chars = (context_size as usize)
+        .saturating_mul(3)
+        .saturating_sub(512)
+        .max(2048);
+
+    if diff.len() <= max_chars {
+        return diff.to_string();
+    }
+
+    let mut trimmed: String = diff.chars().take(max_chars).collect();
+    if let Some(pos) = trimmed.rfind('\n') {
+        trimmed.truncate(pos);
+    }
+
+    format!("{trimmed}\n\n{}", language.truncated_diff_notice())
+}
+
+fn build_diff_variants(
+    diff: &str,
+    language: &Language,
+    context_size: i32,
+    kind: PromptKind,
+) -> Vec<String> {
     let summary = build_diff_summary(diff, language, context_size);
-    let raw = build_diff_raw_tail(diff, language, context_size);
+    // The committed model was trained on near-raw `Diff:\n{diff}` input, so it
+    // gets the raw head as primary variant; other models keep the summary first.
+    let raw = match kind {
+        PromptKind::Committed => build_diff_raw_head(diff, language, context_size),
+        PromptKind::Legacy => build_diff_raw_tail(diff, language, context_size),
+    };
     if summary.trim() == raw.trim() {
-        vec![summary]
-    } else {
-        vec![summary, raw]
+        return vec![summary];
+    }
+    match kind {
+        PromptKind::Committed => vec![raw, summary],
+        PromptKind::Legacy => vec![summary, raw],
     }
 }
 
@@ -1227,8 +1323,7 @@ fn is_valid_commit_message(message: &str, language: &Language) -> bool {
 
 fn parse_commit_subject(line: &str) -> Option<(&'static str, Option<&str>, &str)> {
     for commit_type in COMMIT_TYPES {
-        if line.starts_with(commit_type) {
-            let rest = &line[commit_type.len()..];
+        if let Some(rest) = line.strip_prefix(commit_type) {
             if rest.starts_with('(') {
                 let end = rest.find("):")?;
                 let scope = rest[1..end].trim();
@@ -1240,8 +1335,8 @@ fn parse_commit_subject(line: &str) -> Option<(&'static str, Option<&str>, &str)
                     return None;
                 }
                 return Some((commit_type, Some(scope), subject));
-            } else if rest.starts_with(':') {
-                let subject = rest[1..].trim();
+            } else if let Some(raw_subject) = rest.strip_prefix(':') {
+                let subject = raw_subject.trim();
                 if subject.is_empty() {
                     return None;
                 }
@@ -1301,7 +1396,7 @@ fn select_language(git_config: &mut GitConfig) -> Result<Language> {
     println!("2. 简体中文");
 
     let choice = loop {
-        let input = get_user_input(&current_lang.select_language_prompt())?;
+        let input = get_user_input(current_lang.select_language_prompt())?;
         match input.parse::<usize>() {
             Ok(1) => break Language::English,
             Ok(2) => break Language::Chinese,
@@ -1314,7 +1409,7 @@ fn select_language(git_config: &mut GitConfig) -> Result<Language> {
         "{}",
         choice
             .language_set_to()
-            .replace("{}", &choice.display_name())
+            .replace("{}", choice.display_name())
     );
     Ok(choice)
 }
@@ -1499,6 +1594,10 @@ fn download_model_from_hub(repo_id: &str, language: &Language) -> Result<PathBuf
         ))
     })?;
 
+    // The default repo ships both a baseline and a fine-tuned GGUF, so pin the
+    // exact file instead of relying on the "contains q4" heuristic below.
+    let pinned = (repo_id == DEFAULT_MODEL_REPO).then_some(DEFAULT_MODEL_FILE);
+
     let mut fallback: Option<&str> = None;
     let mut preferred: Option<&str> = None;
 
@@ -1513,7 +1612,7 @@ fn download_model_from_hub(repo_id: &str, language: &Language) -> Result<PathBuf
             fallback = Some(name);
         }
 
-        if lower.contains("q4") {
+        if pinned == Some(name) || (pinned.is_none() && lower.contains("q4")) {
             preferred = Some(name);
             break;
         }
@@ -1660,7 +1759,7 @@ fn select_model_path(language: &Language) -> Result<PathBuf> {
     println!("{}", language.enter_model_path_hint());
 
     loop {
-        let input = match get_user_input(&language.select_model_prompt()) {
+        let input = match get_user_input(language.select_model_prompt()) {
             Ok(value) => value,
             Err(AppError::InputClosed) => {
                 if let Some(first) = models.first() {
@@ -1952,19 +2051,19 @@ fn main() -> Result<()> {
                 fallback
             } else {
                 println!("{}", language.model_failed_generate());
-                get_user_input(&language.enter_commit_message())?
+                get_user_input(language.enter_commit_message())?
             }
         }
     };
 
     if io::stdin().is_terminal() {
         loop {
-            let choice = get_user_input(&language.use_edit_cancel_prompt())?;
+            let choice = get_user_input(language.use_edit_cancel_prompt())?;
 
             match choice.to_lowercase().as_str() {
                 "u" => break,
                 "e" => {
-                    commit_msg = get_user_input(&language.enter_commit_message())?;
+                    commit_msg = get_user_input(language.enter_commit_message())?;
                     break;
                 }
                 "c" => {
@@ -1979,8 +2078,8 @@ fn main() -> Result<()> {
         println!("\n[git-ca] Non-interactive mode detected. Using generated commit message.");
     }
 
-    let name = git_config.get_or_prompt("user.name", &language.enter_name_prompt())?;
-    let email = git_config.get_or_prompt("user.email", &language.enter_email_prompt())?;
+    let name = git_config.get_or_prompt("user.name", language.enter_name_prompt())?;
+    let email = git_config.get_or_prompt("user.email", language.enter_email_prompt())?;
 
     let signature = Signature::now(&name, &email)?;
     let tree_id = index.write_tree()?;
@@ -2040,7 +2139,7 @@ fn run_doctor(language: &Language) -> Result<()> {
 
     println!("\nPrompt:\n{}\n", prompt);
 
-    let response = session.infer(&prompt, 64).map_err(AppError::from)?;
+    let response = session.infer(&prompt, 64, None).map_err(AppError::from)?;
     println!("Model response:\n{}\n", response.trim());
 
     Ok(())

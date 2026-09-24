@@ -3,8 +3,10 @@ use llama_cpp_sys_2::{
     llama_context_default_params, llama_decode, llama_free, llama_free_model, llama_get_logits,
     llama_get_memory, llama_load_model_from_file, llama_log_set, llama_memory_clear, llama_model,
     llama_model_default_params, llama_model_get_vocab, llama_n_vocab, llama_new_context_with_model,
-    llama_set_n_threads, llama_token, llama_token_eos, llama_token_to_piece, llama_tokenize,
-    llama_vocab, GGML_LOG_LEVEL_ERROR,
+    llama_sampler, llama_sampler_accept, llama_sampler_apply, llama_sampler_free,
+    llama_sampler_init_grammar, llama_set_n_threads, llama_token, llama_token_data,
+    llama_token_data_array, llama_token_eos, llama_token_to_piece, llama_tokenize, llama_vocab,
+    GGML_LOG_LEVEL_ERROR,
 };
 use rand::prelude::*;
 use std::cmp::Ordering;
@@ -16,7 +18,7 @@ use std::sync::Once;
 
 const MAX_SEQ_ID: i32 = 1;
 const PROMPT_CHUNK_SIZE: usize = 256;
-const SAMPLING_TEMPERATURE: f32 = 0.8;
+const SAMPLING_TEMPERATURE: f32 = 0.2;
 const SAMPLING_TOP_K: usize = 40;
 const SAMPLING_TOP_P: f32 = 0.9;
 const SAMPLING_MIN_P: f32 = 0.0;
@@ -109,10 +111,25 @@ impl LlamaSession {
         }
     }
 
-    pub fn infer(&mut self, prompt: &str, max_tokens: usize) -> Result<String, String> {
+    pub fn infer(
+        &mut self,
+        prompt: &str,
+        max_tokens: usize,
+        grammar: Option<&str>,
+    ) -> Result<String, String> {
         let prompt_cstr = CString::new(prompt).map_err(|_| {
             "Prompt contains interior null bytes which cannot be processed".to_string()
         })?;
+
+        let grammar_sampler =
+            grammar
+                .and_then(|gbnf| CString::new(gbnf).ok())
+                .and_then(|gbnf_cstr| {
+                    let sampler = unsafe {
+                        llama_sampler_init_grammar(self.vocab, gbnf_cstr.as_ptr(), c"root".as_ptr())
+                    };
+                    (!sampler.is_null()).then_some(sampler)
+                });
 
         unsafe {
             let memory = llama_get_memory(self.ctx);
@@ -142,7 +159,9 @@ impl LlamaSession {
                     tokens.as_mut_ptr(),
                     capacity as i32,
                     true,
-                    false,
+                    // ChatML markers in the committed-model prompt must map to
+                    // their special token ids, not literal text pieces.
+                    true,
                 )
             };
 
@@ -166,7 +185,6 @@ impl LlamaSession {
             self.decode_sequence(&tokens, 0)?;
         }
 
-        let mut n_past = tokens.len() as i32;
         let mut generated = String::new();
         let eos_token = unsafe { llama_token_eos(self.vocab) };
         let vocab_size = unsafe { llama_n_vocab(self.vocab) } as usize;
@@ -175,11 +193,22 @@ impl LlamaSession {
         let mut decode_error: Option<String> = None;
         let mut has_meaningful_text = false;
 
-        for _ in 0..max_tokens {
+        for n_past in (tokens.len() as i32..).take(max_tokens) {
             let allow_eos = has_meaningful_text;
-            let next_token = unsafe { self.sample_next_token(vocab_size, eos_token, allow_eos) };
+            let next_token = unsafe {
+                self.sample_next_token(
+                    vocab_size,
+                    eos_token,
+                    allow_eos,
+                    grammar_sampler.unwrap_or(ptr::null_mut()),
+                )
+            };
             if next_token == eos_token {
                 break;
+            }
+
+            if let Some(sampler) = grammar_sampler {
+                unsafe { llama_sampler_accept(sampler, next_token) };
             }
 
             let token_text = unsafe { self.token_to_string(next_token) };
@@ -206,8 +235,6 @@ impl LlamaSession {
                 }
             }
 
-            n_past += 1;
-
             if generated.trim().is_empty() {
                 continue;
             }
@@ -219,6 +246,9 @@ impl LlamaSession {
 
         unsafe {
             llama_batch_free(decode_batch);
+            if let Some(sampler) = grammar_sampler {
+                llama_sampler_free(sampler);
+            }
         }
 
         if let Some(err) = decode_error {
@@ -276,6 +306,7 @@ impl LlamaSession {
         vocab_size: usize,
         eos_token: llama_token,
         allow_eos: bool,
+        grammar_sampler: *mut llama_sampler,
     ) -> llama_token {
         let logits_ptr = llama_get_logits(self.ctx);
         if logits_ptr.is_null() {
@@ -288,6 +319,30 @@ impl LlamaSession {
             .enumerate()
             .map(|(idx, &logit)| (idx as llama_token, logit))
             .collect();
+
+        if !grammar_sampler.is_null() {
+            // The grammar sampler marks disallowed tokens with -inf logits, so
+            // it must run before top-k truncation below would drop them anyway.
+            let mut token_data: Vec<llama_token_data> = candidates
+                .iter()
+                .map(|&(id, logit)| llama_token_data { id, logit, p: 0.0 })
+                .collect();
+            let mut array = llama_token_data_array {
+                data: token_data.as_mut_ptr(),
+                size: token_data.len(),
+                selected: -1,
+                sorted: false,
+            };
+            llama_sampler_apply(grammar_sampler, &mut array);
+            candidates = token_data
+                .into_iter()
+                .filter(|d| d.logit.is_finite())
+                .map(|d| (d.id, d.logit))
+                .collect();
+            if candidates.is_empty() {
+                return eos_token;
+            }
+        }
 
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
 
