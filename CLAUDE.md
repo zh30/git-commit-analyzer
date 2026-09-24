@@ -27,7 +27,7 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 ### Core Components
 
 **1. CLI Orchestration (`main.rs:1867-2028`)**
-- Parses command-line arguments (doctor, model, language commands)
+- Parses command-line arguments (doctor, model commands)
 - Orchestrates the entire workflow
 - Handles user interactions for commit confirmation
 
@@ -78,7 +78,7 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 **8. Validation (`main.rs:1190-1239`)**
 - `is_valid_commit_message()` - enforces Git Flow format
 - `parse_commit_subject()` - extracts type, optional scope, and subject
-- English mode requires ASCII subject line
+- Subject line must be ASCII
 - Triggers retry loop on invalid output
 
 ## Key Dependencies
@@ -91,7 +91,7 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 ## Source Layout
 
 - `src/main.rs` — CLI entrypoint, Git integration, diff summarizer, fallback commit generator
-  - **Lines 1-400**: Language enum with 40+ localized methods
+  - **Lines 1-400**: `Language` UI string helpers (English only)
   - **Lines 414-962**: Diff processing functions
   - **Lines 421-544**: Prompt building and model interaction
   - **Lines 1141-1189**: Fallback generation logic
@@ -108,7 +108,6 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 
 ## Configuration
 
-- `commit-analyzer.language` — Prompt language (`en`, `zh`)
 - **Llama context length**: Fixed to 4096 tokens (`DEFAULT_CONTEXT_SIZE`)
 - **Model persistence**: Paths stored in `~/.cache/git-ca/default-model.path` or `.git-ca/default-model.path`
 - **Sampling parameters**: Temperature 0.2, Top-K 40, Top-P 0.9, Min-P 0.0
@@ -130,10 +129,9 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 - Update `DEFAULT_MODEL_REPO` if changing defaults
 
 ### Adjust Prompts
-- `build_commit_prompt()` (lines 421-488) - update language-specific instructions
+- `build_commit_prompt()` (lines 421-488) - update prompt instructions
 - `build_diff_summary()` (lines 784-919) - change how diffs are summarized
-- Add new language support via `Language` enum methods
-- Update multilingual READMEs accordingly
+- Update translated READMEs accordingly
 
 ### Debug Model Issues
 - Run `git ca doctor` to test model loading and inference
@@ -181,9 +179,6 @@ cargo run -- git ca doctor
 # Select or download model
 cargo run -- git ca model
 cargo run -- git ca model pull marzoukbaig14/committed-gguf-0.6b
-
-# Change language
-cargo run -- git ca language
 
 # Release build
 cargo build --release

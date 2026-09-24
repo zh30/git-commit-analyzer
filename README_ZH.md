@@ -10,7 +10,6 @@ Git 提交分析器是一个基于 Rust 的 Git 插件，利用本地 llama.cpp 
 - **智能 diff 摘要**：锁文件、生成物等大文件仅展示概要，避免浪费 Token。
 - **Git Flow 校验**：严格要求 `<type>(<scope>): <subject>`，失败时自动重试或兜底。
 - **交互式 CLI**：支持直接使用、编辑或取消生成的提交说明。
-- **多语言提示**：提供英文（默认）和简体中文两种提示语言。
 - **多平台支持**：macOS 预构建二进制包（Intel + Apple Silicon）。
 
 ## 环境要求
@@ -103,7 +102,6 @@ git ca
 ### 配置命令
 
 - `git ca model` — 交互式模型选择器
-- `git ca language` — 选择英文或简体中文提示
 - `git ca doctor` — 测试模型加载和推理
 - `git ca --version` — 显示版本信息
 

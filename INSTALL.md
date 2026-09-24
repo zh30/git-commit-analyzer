@@ -59,8 +59,7 @@ On initial launch the CLI scans common directories (`./models`, `~/Library/Appli
 
 - `git ca model` — interactive model selector (persisted for future runs)
 - Non-interactive runs reuse the saved model or fall back to the first detected GGUF.
-- `git ca language` — choose English or Simplified Chinese prompts
-- Llama context window is fixed at 1024 tokens
+- Llama context window is fixed at 4096 tokens
 
 ## 6. Troubleshooting
 
@@ -75,7 +74,7 @@ On initial launch the CLI scans common directories (`./models`, `~/Library/Appli
 - On Linux install build essentials (`apt install build-essential cmake` or distro equivalent).
 
 ### llama.cpp context errors
-- Context is fixed to 1024 tokens; trim large staged changes or use a smaller model.
+- Context is fixed to 4096 tokens; trim large staged changes or use a smaller model.
 - Verify available GPU/CPU memory; large models may exceed device limits.
 
 ### Command not found

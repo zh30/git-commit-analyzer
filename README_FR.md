@@ -10,7 +10,6 @@ Git Commit Analyzer est un plugin Git écrit en Rust qui exploite un modèle lla
 - **Résumé intelligent du diff** : les fichiers volumineux (lockfiles, artefacts) sont réduits à des résumés avant l'appel au modèle.
 - **Respect de Git Flow** : vérifie la forme `<type>(<scope>): <subject>` et retente/échoue proprement si nécessaire.
 - **CLI interactif** : vous pouvez accepter, éditer ou annuler le message proposé.
-- **Prompts multilingues** : anglais (par défaut) et chinois simplifié.
 - **Support multi-plateforme** : binaires pré-compilés pour macOS (Intel & Apple Silicon).
 
 ## Prérequis
@@ -103,7 +102,6 @@ git ca
 ### Commandes de configuration
 
 - `git ca model` — Sélecteur de modèle interactif
-- `git ca language` — Choisir les prompts anglais ou chinois simplifié
 - `git ca doctor` — Tester le chargement et l'inférence du modèle
 - `git ca --version` — Afficher les informations de version
 

@@ -329,10 +329,6 @@ setup_git_config() {
 initialize_git_ca() {
     if command_exists git-ca; then
         log_info "初始化git-ca配置..."
-        
-        # 设置默认语言
-        echo "en" | git-ca language >/dev/null 2>&1 || true
-        
         log_success "git-ca配置初始化完成"
     else
         log_warning "git-ca命令不可用，请重新加载shell或重启终端"
@@ -378,7 +374,6 @@ show_usage() {
     echo ""
     echo "配置命令："
     echo "  git ca model    # 选择默认模型"
-    echo "  git ca language # 设置输出语言"
     echo "  git ca --version # 查看版本"
     echo ""
     echo "重要提示："

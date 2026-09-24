@@ -15,7 +15,6 @@ Git Commit Analyzer is a Rust-based Git plugin that generates Conventional Commi
 - **Smart diff summarisation**: Large lockfiles and generated assets are reduced to concise summaries before prompting.
 - **Conventional Commits enforcement**: Ensures responses match `<type>(<scope>): <subject>` and retries/falls back when they don't.
 - **Interactive CLI**: Review, edit, or cancel the generated commit message.
-- **Multi-language prompts**: English (default) and Simplified Chinese.
 - **Multi-platform support**: Pre-built binaries for macOS (Intel & Apple Silicon).
 
 ## Requirements
@@ -108,7 +107,6 @@ For each invocation:
 ### Configuration Commands
 
 - `git ca model` — Interactive model selector
-- `git ca language` — Choose English or Simplified Chinese prompts
 - `git ca doctor` — Test model loading and inference
 - `git ca --version` — Display version information
 
