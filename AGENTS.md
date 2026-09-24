@@ -9,7 +9,7 @@ The CLI entrypoint, prompt workflow, and llama.cpp bindings live in `src/main.rs
 - `cargo fmt` — enforce rustfmt defaults (4-space indent, 100-column width).
 - `cargo clippy -- -D warnings` — lint with warnings treated as build failures.
 - `cargo test` — execute all unit tests; run before every commit and PR.
-- Llama.cpp context length is fixed to 1024 tokens.
+- Llama.cpp context length is fixed to 4096 tokens.
 
 ## Coding Style & Naming Conventions
 Use `snake_case` for functions/files, `CamelCase` for types/enums, and `SCREAMING_SNAKE_CASE` for constants such as `COMMIT_TYPES`. Let rustfmt manage alignment and spacing. Prefer error propagation with `?`, returning `AppError::Custom` only when you need a user-facing message. Comments should explain non-obvious Git plumbing or llama-specific constraints; avoid restating what the code already conveys.

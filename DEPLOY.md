@@ -179,7 +179,7 @@ Configure these secrets in GitHub repository settings:
 ## 6. Model Distribution Notes
 
 No changes to model distribution - the CLI still:
-- Defaults to downloading `unsloth/gemma-3-270m-it-GGUF` from Hugging Face
+- Defaults to downloading `marzoukbaig14/committed-gguf-0.6b` from Hugging Face
 - Supports local GGUF files in `./models` or `~/.cache/git-ca/models`
 - Uses llama.cpp (via `llama-cpp-sys-2`) for local inference
 

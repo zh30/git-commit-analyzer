@@ -16,7 +16,7 @@ Git 提交分析器是一个基于 Rust 的 Git 插件，利用本地 llama.cpp 
 ## 环境要求
 
 - Git ≥ 2.30
-- 一个本地 GGUF 模型（CLI 可自动下载默认模型 `unsloth/gemma-3-270m-it-GGUF`）
+- 一个本地 GGUF 模型（CLI 可自动下载默认模型 `marzoukbaig14/committed-gguf-0.6b`）
 
 ## 安装方式
 
@@ -78,7 +78,7 @@ bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
    - `~/Library/Application Support/git-ca/models`（macOS）
 
 2. **自动下载默认模型**（如果未找到）：
-   - 从 Hugging Face 下载 `unsloth/gemma-3-270m-it-GGUF`
+   - 从 Hugging Face 下载 `marzoukbaig14/committed-gguf-0.6b`
    - 存储至 `~/.cache/git-ca/models/`
 
 3. **交互式选择**（如果找到多个模型）：

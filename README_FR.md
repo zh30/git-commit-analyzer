@@ -16,7 +16,7 @@ Git Commit Analyzer est un plugin Git écrit en Rust qui exploite un modèle lla
 ## Prérequis
 
 - Git ≥ 2.30
-- Un modèle GGUF local (le programme peut télécharger `unsloth/gemma-3-270m-it-GGUF` si aucun modèle n'est disponible)
+- Un modèle GGUF local (le programme peut télécharger `marzoukbaig14/committed-gguf-0.6b` si aucun modèle n'est disponible)
 
 ## Installation
 
@@ -78,7 +78,7 @@ Au premier lancement, le CLI exécute les étapes suivantes :
    - `~/Library/Application Support/git-ca/models` (macOS)
 
 2. **Téléchargement automatique du modèle par défaut** (si aucun trouvé) :
-   - Télécharge `unsloth/gemma-3-270m-it-GGUF` depuis Hugging Face
+   - Télécharge `marzoukbaig14/committed-gguf-0.6b` depuis Hugging Face
    - Le stocke dans `~/.cache/git-ca/models/`
 
 3. **Demande de confirmation** si plusieurs modèles sont trouvés :

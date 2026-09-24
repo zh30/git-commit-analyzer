@@ -21,7 +21,7 @@ Git Commit Analyzer is a Rust-based Git plugin that generates Conventional Commi
 ## Requirements
 
 - Git 2.30+
-- A local GGUF model (the CLI can download the default `unsloth/gemma-3-270m-it-GGUF`)
+- A local GGUF model (the CLI can download the default `marzoukbaig14/committed-gguf-0.6b`)
 
 ## Installation
 
@@ -83,7 +83,7 @@ On first run the CLI will:
    - `~/Library/Application Support/git-ca/models` (macOS)
 
 2. **Download default model** automatically if none found:
-   - Downloads `unsloth/gemma-3-270m-it-GGUF` from Hugging Face
+   - Downloads `marzoukbaig14/committed-gguf-0.6b` from Hugging Face
    - Stores it in `~/.cache/git-ca/models/`
 
 3. **Prompt for confirmation** if multiple models are found:

@@ -37,7 +37,7 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
   - `~/.cache/git-ca/models` (Linux)
   - `~/.local/share/git-ca/models` (Linux alt)
   - `~/Library/Application Support/git-ca/models` (macOS)
-- Downloads default model (`unsloth/gemma-3-270m-it-GGUF`) from Hugging Face if none found
+- Downloads default model (`marzoukbaig14/committed-gguf-0.6b`, a Qwen3-0.6B fine-tune for Conventional Commits, `committed-0.6b-finetuned-Q4_K_M.gguf`) from Hugging Face if none found
 - Persists selection to `~/.cache/git-ca/default-model.path` or `.git-ca/default-model.path`
 
 **3. Diff Processing (`main.rs:414-962`)**
@@ -47,7 +47,8 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 - **Variants**: `build_diff_variants()` - creates summary and raw variants for retry attempts
 
 **4. Prompt Engineering (`main.rs:421-488`)**
-- Builds language-specific prompts (English/Chinese)
+- `prompt_kind_for()` selects the prompt style from the model filename: `committed-*` GGUFs get the Committed recipe (ChatML template + fixed system instruction + `/no_think`), all other models get the generic plain-text prompt
+- Committed prompts feed the near-raw diff head (matching its `Diff:\n{diff}` training input); legacy prompts keep the summarized variant first
 - Enforces Git Flow format: `<type>(<scope>): <subject>`
 - Includes strict validation rules
 - Stricter retry prompts on subsequent attempts
@@ -56,8 +57,9 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 - **Session Management**: `LlamaSession::new()` - loads GGUF model, initializes context
 - **Tokenization**: Handles prompt encoding with buffer resizing
 - **Generation**: Token-by-token sampling with temperature/top-k/top-p
+- **Grammar**: Optional GBNF grammar (`COMMIT_GRAMMAR`) via `llama_sampler_init_grammar` constrains committed-model output to `type(scope)?: subject`; the `type` codebook is limited to `COMMIT_TYPES` at decode time
 - **Chunked Decoding**: Processes long prompts in 256-token chunks
-- **Context Management**: Clears KV cache between runs, respects 1024-token limit
+- **Context Management**: Clears KV cache between runs, respects the 4096-token limit
 
 **6. Response Processing (`main.rs:546-667`)**
 - Strips `<thinking>` blocks if present
@@ -107,9 +109,9 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 ## Configuration
 
 - `commit-analyzer.language` — Prompt language (`en`, `zh`)
-- **Llama context length**: Fixed to 1024 tokens (`DEFAULT_CONTEXT_SIZE`)
+- **Llama context length**: Fixed to 4096 tokens (`DEFAULT_CONTEXT_SIZE`)
 - **Model persistence**: Paths stored in `~/.cache/git-ca/default-model.path` or `.git-ca/default-model.path`
-- **Sampling parameters**: Temperature 0.8, Top-K 40, Top-P 0.9, Min-P 0.0
+- **Sampling parameters**: Temperature 0.2, Top-K 40, Top-P 0.9, Min-P 0.0
 
 ## Common Development Tasks
 
@@ -178,7 +180,7 @@ cargo run -- git ca doctor
 
 # Select or download model
 cargo run -- git ca model
-cargo run -- git ca model pull unsloth/gemma-3-270m-it-GGUF
+cargo run -- git ca model pull marzoukbaig14/committed-gguf-0.6b
 
 # Change language
 cargo run -- git ca language
@@ -213,7 +215,7 @@ cargo build --release
 6. Prevents EOS tokens until meaningful text generated
 
 **Context Management**:
-- Fixed 1024-token context window
+- Fixed 4096-token context window
 - Prompts truncated if exceeding `n_ctx - 32`
 - Raw diff tail used as fallback variant
 - KV cache cleared between inferences

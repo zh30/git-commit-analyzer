@@ -6,7 +6,7 @@ Git Commit Analyzer ships as a single Rust binary (`git-ca`) that integrates wit
 - Git 2.30 or later
 - Rust toolchain (stable channel) with `cargo`
 - Build prerequisites for llama.cpp (`cmake`, `make`, C/C++ compiler, GPU drivers as needed)
-- A local GGUF model (the CLI can download `unsloth/gemma-3-270m-it-GGUF` automatically)
+- A local GGUF model (the CLI can download `marzoukbaig14/committed-gguf-0.6b` automatically)
 
 ## 2. Manual Installation
 
@@ -92,5 +92,5 @@ git config --global --unset commit-analyzer.language 2>/dev/null
 
 ## 8. Support
 - Issues: <https://github.com/zh30/git-commit-analyzer/issues>
-- Default model: <https://huggingface.co/unsloth/gemma-3-270m-it-GGUF>
+- Default model: <https://huggingface.co/marzoukbaig14/committed-gguf-0.6b>
 - llama.cpp documentation: <https://github.com/ggerganov/llama.cpp>
