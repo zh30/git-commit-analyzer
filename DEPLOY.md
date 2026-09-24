@@ -179,7 +179,7 @@ Configure these secrets in GitHub repository settings:
 ## 6. Model Distribution Notes
 
 Model distribution notes:
-- Hardware tiers download Qwen3 GGUFs (`0.6B` / `1.7B` / `4B`) from Hugging Face
+- The default model `marzoukbaig14/committed-gguf-0.6b` (pinned `committed-0.6b-finetuned-Q4_K_M.gguf`) downloads from Hugging Face; `small`/`default`/`quality` Qwen3 tiers remain pull options
 - Supports local GGUF files in `./models` or `~/.cache/git-ca/models`
 - Uses llama.cpp (via `llama-cpp-sys-2`) for local inference with adaptive context
 

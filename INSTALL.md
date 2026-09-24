@@ -6,7 +6,7 @@ Git Commit Analyzer ships as a single Rust binary (`git-ca`) that integrates wit
 - Git 2.30 or later
 - Rust toolchain (stable channel) with `cargo`
 - Build prerequisites for llama.cpp (`cmake`, `make`, C/C++ compiler, GPU drivers as needed)
-- A local GGUF model (the CLI can auto-download a Qwen3 tier from Hugging Face)
+- A local GGUF model (the CLI can auto-download `marzoukbaig14/committed-gguf-0.6b` from Hugging Face)
 
 ## 2. Manual Installation
 
@@ -60,7 +60,6 @@ On initial launch the CLI probes system memory, recommends a model tier (`small`
 - `git ca model` — interactive tier + local model selector (persisted for future runs)
 - `git ca model pull [small|default|quality|<repo>]` — download a tier or custom HF GGUF
 - Non-interactive runs reuse the saved model or fall back to the first detected GGUF.
-- `git ca language` — choose English or Simplified Chinese prompts
 - Context length is adaptive (typically 4K–16K); override with `commit-analyzer.context`
 
 ## 6. Troubleshooting
@@ -94,5 +93,5 @@ git config --global --unset commit-analyzer.language 2>/dev/null
 
 ## 8. Support
 - Issues: <https://github.com/zh30/git-commit-analyzer/issues>
-- Default tiers: <https://huggingface.co/Qwen/Qwen3-1.7B-GGUF> (also 0.6B / 4B)
+- Default model: <https://huggingface.co/marzoukbaig14/committed-gguf-0.6b> (optional Qwen3 tiers: 0.6B / 1.7B / 4B)
 - llama.cpp documentation: <https://github.com/ggerganov/llama.cpp>

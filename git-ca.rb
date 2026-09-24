@@ -22,7 +22,7 @@ class GitCa < Formula
       To use git-ca, you need a local GGUF model (llama.cpp format).
 
       The tool will automatically download the default model
-      (unsloth/gemma-3-270m-it-GGUF) on first run, or you can:
+      (marzoukbaig14/committed-gguf-0.6b) on first run, or you can:
         - Place GGUF files in ./models directory
         - Place GGUF files in ~/.cache/git-ca/models directory
         - Run 'git ca model' to select a model manually

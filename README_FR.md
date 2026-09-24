@@ -10,13 +10,12 @@ Git Commit Analyzer est un plugin Git écrit en Rust qui exploite un modèle lla
 - **Résumé intelligent du diff** : les fichiers volumineux (lockfiles, artefacts) sont réduits à des résumés avant l'appel au modèle.
 - **Validation Conventional Commits** : vérifie la forme `<type>(<scope>): <subject>` et retente/échoue proprement si nécessaire.
 - **CLI interactif** : vous pouvez accepter, éditer ou annuler le message proposé.
-- **Prompts multilingues** : anglais (par défaut) et chinois simplifié.
 - **Support multi-plateforme** : binaires pré-compilés pour macOS (Intel & Apple Silicon).
 
 ## Prérequis
 
 - Git ≥ 2.30
-- Un modèle GGUF local (le programme peut télécharger un palier Qwen3 depuis Hugging Face)
+- Un modèle GGUF local (le programme peut télécharger `marzoukbaig14/committed-gguf-0.6b` depuis Hugging Face)
 
 ## Installation
 
@@ -78,7 +77,7 @@ Au premier lancement, le CLI exécute les étapes suivantes :
    - `~/Library/Application Support/git-ca/models` (macOS)
 
 2. **Téléchargement automatique du modèle par défaut** (si aucun trouvé) :
-   - Télécharge un palier Qwen3 (Q4) depuis Hugging Face
+   - Télécharge `marzoukbaig14/committed-gguf-0.6b` (Q4_K_M, fine-tune Qwen3-0.6B pour Conventional Commits) depuis Hugging Face
    - Le stocke dans `~/.cache/git-ca/models/`
 
 3. **Demande de confirmation** si plusieurs modèles sont trouvés :
@@ -103,7 +102,6 @@ git ca
 ### Commandes de configuration
 
 - `git ca model` — Sélecteur de modèle interactif
-- `git ca language` — Choisir les prompts anglais ou chinois simplifié
 - `git ca doctor` — Tester le chargement et l'inférence du modèle
 - `git ca --version` — Afficher les informations de version
 

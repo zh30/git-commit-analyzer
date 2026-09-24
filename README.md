@@ -13,17 +13,17 @@ messages when needed.
 ## Key Features
 
 - **Local inference**: Uses `llama_cpp_sys_2` to run GGUF models without any remote API calls.
-- **Any-device model tiers**: Auto-selects small / default / quality Qwen3 GGUFs from system memory (4K–16K context; `/no_think` for fast structured output).
+- **Task-tuned default model**: Auto-downloads `committed-0.6b` (a Qwen3-0.6B fine-tune trained for Conventional Commits) on first run; official Qwen3 tiers stay available via `git ca model pull`.
+- **Adaptive context**: Sizes the llama.cpp context from system memory (4K–16K tokens).
 - **Hierarchical diff packing**: Multi-file commits keep an inventory + key signatures before filling leftover budget with snippets.
-- **Conventional Commits validation**: Ensures responses match `<type>(<scope>): <subject>` and retries/falls back when they don't.
+- **Conventional Commits validation**: Grammar-constrained decoding keeps output at `<type>(<scope>): <subject>`, with retry/fallback when needed.
 - **Interactive CLI**: Review, edit, or cancel the generated commit message.
-- **Multi-language prompts**: English (default) and Simplified Chinese.
 - **Multi-platform support**: Pre-built binaries for macOS (Intel & Apple Silicon).
 
 ## Requirements
 
 - Git 2.30+
-- A local GGUF model (the CLI can auto-download a Qwen3 tier from Hugging Face)
+- A local GGUF model (the CLI can auto-download `marzoukbaig14/committed-gguf-0.6b` from Hugging Face)
 
 ## Installation
 
@@ -89,10 +89,7 @@ bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
 
 On first run the CLI will:
 
-1. **Probe system memory** and recommend a model tier:
-   - `small` (Qwen3-0.6B) — low-RAM / older machines, ~4K context
-   - `default` (Qwen3-1.7B) — balanced, ~8K context
-   - `quality` (Qwen3-4B) — higher quality when memory allows, ~16K context
+1. **Probe system memory** to size the context window (4K–16K tokens).
 
 2. **Scan for models** in common directories:
    - `./models` (project directory)
@@ -100,13 +97,14 @@ On first run the CLI will:
    - `~/.local/share/git-ca/models` (Linux alt)
    - `~/Library/Application Support/git-ca/models` (macOS)
 
-3. **Download a tier model** automatically if none found (Q4 GGUF from Hugging Face into `~/.cache/git-ca/models/`).
+3. **Download the default model** automatically if none found: `marzoukbaig14/committed-gguf-0.6b` (Q4_K_M GGUF, ~397 MB, a Qwen3-0.6B fine-tune for Conventional Commits) into `~/.cache/git-ca/models/`.
 
 4. **Prompt interactively** when multiple models/tiers are available:
    ```bash
    git ca model              # Interactive selector (tiers + local GGUFs)
-   git ca model pull         # Auto-download recommended tier
-   git ca model pull quality # Force a specific tier
+   git ca model pull         # Download the recommended Qwen3 tier
+   git ca model pull quality # Force a specific tier (small|default|quality)
+   git ca model pull <repo>  # Pull a custom HF GGUF repo
    ```
 
 ## Usage
@@ -127,7 +125,6 @@ For each invocation:
 
 - `git ca model` — Interactive model / tier selector
 - `git ca model pull [small|default|quality|<repo>]` — Download a tier or custom HF GGUF repo
-- `git ca language` — Choose English or Simplified Chinese prompts
 - `git ca doctor` — Hardware profile + model loading smoke test
 - `git ca --version` — Display version information
 

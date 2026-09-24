@@ -21,10 +21,10 @@ Unit tests live in `#[cfg(test)]` modules with descriptive names like `handles_r
 Follow the existing Conventional Commit style—examples include `feat(cli): simplify prompt`, `fix(llama): handle kv cache reset`, `chore(deps): update dependencies`. Each PR must summarise behavior changes, list verification steps (tests, manual runs), and update affected docs (`README*.md`, `DEPLOY.md`, `CLAUDE.md`). Link relevant issues and include terminal captures when altering user-visible prompts or installer UX.
 
 ## Model & Configuration Tips
-Hardware-aware tiers select a default GGUF when none is persisted:
+The default model `marzoukbaig14/committed-gguf-0.6b` (Qwen3-0.6B fine-tune, pinned `committed-0.6b-finetuned-Q4_K_M.gguf`) auto-downloads when no local GGUF exists. Hardware probing still recommends pull tiers and sizes the context window:
 - `small` → Qwen3-0.6B (~4K ctx) for low-RAM machines
 - `default` → Qwen3-1.7B (~8K ctx) balanced
 - `quality` → Qwen3-4B (~16K ctx) when memory allows
-- Commit prompts include `/no_think` so Qwen3 skips chain-of-thought
+- `committed-*` models use their ChatML training recipe plus GBNF grammar; other models get the generic `/no_think` prompt so Qwen3 skips chain-of-thought
 
 Use `git ca model pull [small|default|quality|<repo>]` to download. Prefer git config keys `commit-analyzer.model-tier` and `commit-analyzer.context` for overrides. Local models are still scanned under `./models` and cache dirs; a persisted path wins when valid. Diff packing is hierarchical (L0 inventory → L1 key lines → L2 snippets) so multi-file commits fit the adaptive context budget.

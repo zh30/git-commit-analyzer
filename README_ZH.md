@@ -7,17 +7,17 @@ Git 提交分析器是一个基于 Rust 的 Git 插件，利用本地 llama.cpp 
 ## 功能特性
 
 - **本地推理**：通过 `llama_cpp_sys_2` 调用 GGUF 模型，无需远程 API。
-- **多档位自适应**：按内存自动选择 small / default / quality（Qwen3 GGUF，约 4K–16K 上下文；prompt 带 `/no_think`）。
+- **任务微调默认模型**：首次运行自动下载 `committed-0.6b`（专为 Conventional Commits 微调的 Qwen3-0.6B）；官方 Qwen3 档位仍可通过 `git ca model pull` 获取。
+- **自适应上下文**：按系统内存调整 llama.cpp 上下文窗口（4K–16K tokens）。
 - **分层 diff 打包**：多文件提交先给文件清单与关键签名，再按预算填充片段。
-- **Conventional Commits 校验**：严格要求 `<type>(<scope>): <subject>`，失败时自动重试或兜底。
+- **Conventional Commits 校验**：GBNF 语法约束解码保证 `<type>(<scope>): <subject>` 格式，失败时自动重试或兜底。
 - **交互式 CLI**：支持直接使用、编辑或取消生成的提交说明。
-- **多语言提示**：提供英文（默认）和简体中文两种提示语言。
 - **多平台支持**：macOS 预构建二进制包（Intel + Apple Silicon）。
 
 ## 环境要求
 
 - Git ≥ 2.30
-- 一个本地 GGUF 模型（CLI 可按硬件档位自动下载 Qwen3 Q4）
+- 一个本地 GGUF 模型（CLI 可自动下载 `marzoukbaig14/committed-gguf-0.6b`）
 
 ## 安装方式
 
@@ -72,10 +72,7 @@ bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
 
 首次运行 CLI 会执行以下步骤：
 
-1. **探测系统内存**并推荐模型档位：
-   - `small`（Qwen3-0.6B）— 低内存 / 老机器，约 4K 上下文
-   - `default`（Qwen3-1.7B）— 均衡，约 8K 上下文
-   - `quality`（Qwen3-4B）— 内存充足时更高质量，约 16K 上下文
+1. **探测系统内存**以调整上下文窗口（4K–16K tokens）。
 
 2. **扫描模型** 在常用目录：
    - `./models`（项目目录）
@@ -83,13 +80,14 @@ bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
    - `~/.local/share/git-ca/models`（Linux 备用）
    - `~/Library/Application Support/git-ca/models`（macOS）
 
-3. **自动下载档位模型**（如果未找到）：从 Hugging Face 拉取 Q4 GGUF 到 `~/.cache/git-ca/models/`
+3. **自动下载默认模型**（如果未找到）：`marzoukbaig14/committed-gguf-0.6b`（Q4_K_M，约 397MB，专为 Conventional Commits 微调的 Qwen3-0.6B）到 `~/.cache/git-ca/models/`。
 
 4. **交互式选择**（多模型 / 多档位时）：
    ```bash
    git ca model              # 交互选择（档位 + 本地 GGUF）
-   git ca model pull         # 自动下载推荐档位
-   git ca model pull quality # 强制指定档位
+   git ca model pull         # 下载推荐的 Qwen3 档位
+   git ca model pull quality # 强制指定档位（small|default|quality）
+   git ca model pull <仓库>  # 拉取自定义 HF 仓库
    ```
 
 ## 使用说明
@@ -110,7 +108,6 @@ git ca
 
 - `git ca model` — 交互式模型 / 档位选择器
 - `git ca model pull [small|default|quality|<仓库>]` — 下载档位或自定义 HF 仓库
-- `git ca language` — 选择英文或简体中文提示
 - `git ca doctor` — 硬件概况 + 模型加载烟测
 - `git ca --version` — 显示版本信息
 

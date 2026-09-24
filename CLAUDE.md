@@ -27,23 +27,23 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 ### Core Components
 
 **1. CLI Orchestration (src/main.rs)**
-- Parses command-line arguments (doctor, model, language commands)
+- Parses command-line arguments (doctor, model commands)
 - Orchestrates the entire workflow
 - Handles user interactions for commit confirmation
 
 **2. Model Management (src/main.rs)**
-- Hardware probe (`detect_total_memory_mib`) recommends a tier:
+- Default model: `marzoukbaig14/committed-gguf-0.6b` (pinned `committed-0.6b-finetuned-Q4_K_M.gguf`, a Qwen3-0.6B fine-tune for Conventional Commits) auto-downloaded when no local GGUF exists
+- Hardware probe (`detect_total_memory_mib`) recommends a pull tier and sizes the context:
   - `small` → `Qwen/Qwen3-0.6B-GGUF` (~4K ctx)
   - `default` → `Qwen/Qwen3-1.7B-GGUF` (~8K ctx)
   - `quality` → `Qwen/Qwen3-4B-GGUF` (~16K ctx)
-  - Prompts prefix `/no_think` to disable Qwen3 thinking mode
+  - Non-committed prompts prefix `/no_think` to disable Qwen3 thinking mode
 - Git config overrides: `commit-analyzer.model-tier`, `commit-analyzer.context`
 - Scans default directories for GGUF files:
   - `./models` (project directory)
   - `~/.cache/git-ca/models` (Linux)
   - `~/.local/share/git-ca/models` (Linux alt)
   - `~/Library/Application Support/git-ca/models` (macOS)
-- Downloads recommended-tier Q4 GGUF from Hugging Face if none found
 - Persists selection to `~/.cache/git-ca/default-model.path` or `.git-ca/default-model.path`
 - CLI: `git ca model pull [small|default|quality|<repo>]`
 
@@ -54,18 +54,18 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
   - L0: file inventory with +/- counts
   - L1: key signatures / high-signal hunks (budget-first)
   - L2: additional snippets from high-churn files when budget remains
-- **Variants**: `build_diff_variants()` - full hierarchy then L0+L1-only (or raw tail) for retries
+- **Variants**: `build_diff_variants()` - committed models get near-raw diff head then hierarchy; other models get full hierarchy then L0+L1-only (or raw tail) for retries
 
 **4. Prompt Engineering (src/main.rs)**
-- Builds language-specific prompts (English/Chinese)
-- Enforces Conventional Commits format: `<type>(<scope>): <subject>`
+- `prompt_kind_for()` picks the recipe from the model filename: `committed-*` GGUFs get ChatML + fixed system instruction + `/no_think` (their training format); other models get the generic `/no_think` plain-text prompt
+- English-only prompts; enforces Conventional Commits format: `<type>(<scope>): <subject>`
 - Includes strict validation rules
 - Stricter retry prompts on subsequent attempts
 
 **5. Model Inference (src/llama.rs)**
 - **Session Management**: `LlamaSession::new()` - loads GGUF model, initializes context
 - **Tokenization**: Handles prompt encoding with buffer resizing
-- **Generation**: Token-by-token sampling with temperature 0.3 / top-k / top-p (stable structured output)
+- **Generation**: Token-by-token sampling with temperature 0.2 / top-k / top-p (stable structured output); optional GBNF grammar (`COMMIT_GRAMMAR`) via `llama_sampler_init_grammar` constrains committed-model output to the project's 7 commit types at decode time
 - **Chunked Decoding**: Processes long prompts in 256-token chunks
 - **Context Management**: Clears KV cache between runs; adaptive n_ctx (4K–16K typical); n_batch capped at 512
 
@@ -86,7 +86,7 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 **8. Validation (src/main.rs)**
 - `is_valid_commit_message()` - enforces Conventional Commits format
 - `parse_commit_subject()` - extracts type, optional scope, and subject
-- English mode requires ASCII subject line
+- Subject line must be ASCII
 - Triggers retry loop on invalid output
 
 ## Key Dependencies
@@ -99,7 +99,7 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 ## Source Layout
 
 - `src/main.rs` — CLI entrypoint, Git integration, diff summarizer, fallback commit generator
-  - Language enum with 40+ localized methods
+  - `Language` UI string helpers (English only)
   - Diff processing functions
   - Prompt building and model interaction
   - Fallback generation logic
@@ -131,9 +131,6 @@ cargo run -- git ca doctor
 cargo run -- git ca model
 cargo run -- git ca model pull default
 
-# Change language
-cargo run -- git ca language
-
 # Release build
 cargo build --release
 
@@ -143,12 +140,11 @@ cargo test handles_extracts_subject_line
 
 ## Configuration
 
-- `commit-analyzer.language` — Prompt language (`en`, `zh`)
 - `commit-analyzer.model-tier` — `small` | `default` | `quality` (optional; auto from RAM when unset)
 - `commit-analyzer.context` — Override llama context tokens (clamped by RAM heuristics)
 - **Llama context length**: Adaptive (typically 4096 / 8192 / 16384 by tier + RAM)
 - **Model persistence**: Paths stored in `~/.cache/git-ca/default-model.path` or `.git-ca/default-model.path`
-- **Sampling parameters**: Temperature 0.3, Top-K 40, Top-P 0.9, Min-P 0.0
+- **Sampling parameters**: Temperature 0.2, Top-K 40, Top-P 0.9, Min-P 0.0
 
 ## Critical Implementation Details
 

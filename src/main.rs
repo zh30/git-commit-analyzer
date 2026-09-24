@@ -10,10 +10,57 @@ use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-const CONFIG_LANGUAGE_KEY: &str = "commit-analyzer.language";
 const CONFIG_MODEL_TIER_KEY: &str = "commit-analyzer.model-tier";
 const CONFIG_CONTEXT_KEY: &str = "commit-analyzer.context";
 const COMMIT_TYPES: &[&str] = &["feat", "fix", "docs", "style", "refactor", "test", "chore"];
+const DEFAULT_MODEL_REPO: &str = "marzoukbaig14/committed-gguf-0.6b";
+const DEFAULT_MODEL_FILE: &str = "committed-0.6b-finetuned-Q4_K_M.gguf";
+
+// Constrains generation to `type(scope)?: subject` so the commit line is
+// well-formed by construction. `type` is limited to COMMIT_TYPES, which is
+// narrower than the committed model's trained codebook (it also knows
+// perf/build/ci) — the grammar resolves that mismatch at decode time.
+const COMMIT_GRAMMAR: &str = r#"
+root        ::= type scope? ": " description
+type        ::= "feat" | "fix" | "docs" | "style" | "refactor" | "test" | "chore"
+scope       ::= "(" [a-zA-Z0-9_./-]+ ")"
+description ::= [^ \t\n.] ([^\n]* [^ \t\n.])?
+"#;
+
+/// Prompt style chosen by the model filename. `committed-*` GGUFs are the
+/// QLoRA fine-tunes trained on `Diff:\n{diff}` with a fixed system instruction,
+/// so they get their training recipe (ChatML + `/no_think`); everything else
+/// gets the generic plain-text prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromptKind {
+    Committed,
+    Legacy,
+}
+
+fn prompt_kind_for(model_path: &Path) -> PromptKind {
+    model_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| {
+            if name.contains("committed") {
+                PromptKind::Committed
+            } else {
+                PromptKind::Legacy
+            }
+        })
+        .unwrap_or(PromptKind::Legacy)
+}
+
+const COMMITTED_SYSTEM_INSTRUCTION: &str = r#"You generate a single Conventional Commits subject line from a unified diff.
+Output exactly one line of the form "<type>(<scope>): <description>" — scope optional — and nothing else: no prose, no code fences, no quotes.
+Choose the type by what the change is, not by which files it touches:
+feat — adds a capability; fix — corrects a bug; docs — documentation only; style — formatting with no change in logic; refactor — restructures code without changing behavior; perf — improves performance; test — adds or fixes tests; build — build system or dependencies; ci — CI configuration; chore — maintenance touching neither source nor tests.
+Add a scope in parentheses only when a single file or area clearly owns the change; if the change is spread out or the owner is unclear, omit it.
+Write the description so that:
+- It reads correctly after "If applied, this commit will…" — imperative verb first ("add", never "adds" or "added").
+- It states only what the diff shows. You can see what changed, not why, so never invent a reason, motivation, or outcome the diff doesn't contain; when unsure, say less rather than guess.
+- It names the most significant change when the diff touches several things.
+- It is specific: name the real function, file, flag, or endpoint, and skip filler verbs ("update", "change") and vague objects ("code", "stuff") when something precise fits."#;
 /// Fallback when hardware probing is unavailable.
 const MIN_CONTEXT_SIZE: i32 = 2048;
 const MAX_CONTEXT_SIZE: i32 = 32768;
@@ -213,381 +260,187 @@ fn resolve_model_tier(git_config: &GitConfig, hardware: &HardwareProfile) -> Mod
     hardware.recommended_tier
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum Language {
-    English,
-    Chinese,
-}
+struct Language;
 
 impl Language {
-    fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "en" | "english" => Some(Language::English),
-            "zh" | "chinese" | "中文" => Some(Language::Chinese),
-            _ => None,
-        }
-    }
-
-    fn to_string(&self) -> &'static str {
-        match self {
-            Language::English => "en",
-            Language::Chinese => "zh",
-        }
-    }
-
-    fn display_name(&self) -> &'static str {
-        match self {
-            Language::English => "English",
-            Language::Chinese => "简体中文",
-        }
-    }
-
     fn generating_commit_message(&self) -> &'static str {
-        match self {
-            Language::English => "Generating commit message...",
-            Language::Chinese => "正在生成提交信息...",
-        }
+        "Generating commit message..."
     }
 
     fn this_may_take_moment(&self) -> &'static str {
-        match self {
-            Language::English => "This may take a moment depending on your model and system...",
-            Language::Chinese => "这可能需要一些时间，取决于您的模型和系统配置...",
-        }
+        "This may take a moment depending on your model and system..."
     }
 
     fn processing_response(&self) -> &'static str {
-        match self {
-            Language::English => "Processing response...",
-            Language::Chinese => "正在处理响应...",
-        }
+        "Processing response..."
     }
 
     fn commit_message_generated(&self) -> &'static str {
-        match self {
-            Language::English => "\n\nCommit message generated.",
-            Language::Chinese => "\n\n提交信息已生成。",
-        }
-    }
-
-    fn available_languages(&self) -> &'static str {
-        match self {
-            Language::English => "Available languages:",
-            Language::Chinese => "可选语言：",
-        }
-    }
-
-    fn select_language_prompt(&self) -> &'static str {
-        match self {
-            Language::English => "\nSelect a language by number: ",
-            Language::Chinese => "\n请输入语言编号：",
-        }
+        "\n\nCommit message generated."
     }
 
     fn invalid_selection(&self) -> &'static str {
-        match self {
-            Language::English => "Invalid selection. Please try again.",
-            Language::Chinese => "无效选择，请重试。",
-        }
-    }
-
-    fn language_set_to(&self) -> &'static str {
-        match self {
-            Language::English => "Language set to: {}",
-            Language::Chinese => "语言已设置为：{}",
-        }
+        "Invalid selection. Please try again."
     }
 
     fn fetching_models(&self) -> &'static str {
-        match self {
-            Language::English => "Searching for local GGUF models...",
-            Language::Chinese => "正在搜索本地 GGUF 模型...",
-        }
+        "Searching for local GGUF models..."
     }
 
     fn available_models(&self) -> &'static str {
-        match self {
-            Language::English => "\nDetected GGUF models:",
-            Language::Chinese => "\n检测到的 GGUF 模型：",
-        }
+        "\nDetected GGUF models:"
     }
 
     fn model_set_as_default(&self) -> &'static str {
-        match self {
-            Language::English => "Model path ready: {}",
-            Language::Chinese => "模型路径已就绪：{}",
-        }
+        "Model path ready: {}"
     }
 
     fn no_default_model(&self) -> &'static str {
-        match self {
-            Language::English => "No model path available. Please select a GGUF file.",
-            Language::Chinese => "当前没有可用的模型路径，请选择一个 GGUF 文件。",
-        }
+        "No model path available. Please select a GGUF file."
     }
 
     fn no_changes_staged(&self) -> &'static str {
-        match self {
-            Language::English => "No changes staged for commit.",
-            Language::Chinese => "没有暂存的更改可提交。",
-        }
+        "No changes staged for commit."
     }
 
     fn use_edit_cancel_prompt(&self) -> &'static str {
-        match self {
-            Language::English => {
-                "\nDo you want to (u)se this message, (e)dit it, or (c)ancel? [u/e/c]: "
-            }
-            Language::Chinese => "\n您想要 (u) 使用此信息，(e) 编辑它，还是 (c) 取消？[u/e/c]：",
-        }
+        "\nDo you want to (u)se this message, (e)dit it, or (c)ancel? [u/e/c]: "
     }
 
     fn enter_commit_message(&self) -> &'static str {
-        match self {
-            Language::English => "Enter your commit message (use multiple lines if needed, end with an empty line):\n",
-            Language::Chinese => "请输入您的提交信息（如需要可使用多行，以空行结束）：\n",
-        }
+        "Enter your commit message (use multiple lines if needed, end with an empty line):\n"
     }
 
     fn commit_cancelled(&self) -> &'static str {
-        match self {
-            Language::English => "Commit cancelled.",
-            Language::Chinese => "提交已取消。",
-        }
+        "Commit cancelled."
     }
 
     fn invalid_choice(&self) -> &'static str {
-        match self {
-            Language::English => "Invalid choice. Please try again.",
-            Language::Chinese => "无效选择，请重试。",
-        }
+        "Invalid choice. Please try again."
     }
 
     fn enter_name_prompt(&self) -> &'static str {
-        match self {
-            Language::English => "Enter your name: ",
-            Language::Chinese => "请输入您的姓名：",
-        }
+        "Enter your name: "
     }
 
     fn enter_email_prompt(&self) -> &'static str {
-        match self {
-            Language::English => "Enter your email: ",
-            Language::Chinese => "请输入您的邮箱：",
-        }
+        "Enter your email: "
     }
 
     fn changes_committed(&self) -> &'static str {
-        match self {
-            Language::English => "\nChanges committed successfully.",
-            Language::Chinese => "\n更改已成功提交。",
-        }
+        "\nChanges committed successfully."
     }
 
     fn commit_message_label(&self) -> &'static str {
-        match self {
-            Language::English => "Commit message:\n{}",
-            Language::Chinese => "提交信息：\n{}",
-        }
+        "Commit message:\n{}"
     }
 
     fn model_retrying_invalid_output(&self) -> &'static str {
-        match self {
-            Language::English => {
-                "Model response was invalid. Retrying with stricter instructions..."
-            }
-            Language::Chinese => "模型输出无效，正在使用更严格的提示重试...",
-        }
+        "Model response was invalid. Retrying with stricter instructions..."
     }
 
     fn model_failed_generate(&self) -> &'static str {
-        match self {
-            Language::English => {
-                "Model could not produce a valid commit message. Please enter one manually."
-            }
-            Language::Chinese => "模型未能生成有效的提交信息，请手动输入。",
-        }
+        "Model could not produce a valid commit message. Please enter one manually."
     }
 
     fn fallback_commit_generated(&self) -> &'static str {
-        match self {
-            Language::English => "\n\nGenerated a fallback commit message.",
-            Language::Chinese => "\n\n已生成备用提交信息。",
-        }
+        "\n\nGenerated a fallback commit message."
     }
 
     fn truncated_diff_notice(&self) -> &'static str {
-        match self {
-            Language::English => "[Diff truncated to reduce context size.]",
-            Language::Chinese => "[为控制上下文长度，diff 已被截断。]",
-        }
+        "[Diff truncated to reduce context size.]"
     }
 
     fn changed_files_heading(&self) -> &'static str {
-        match self {
-            Language::English => "Changed files:",
-            Language::Chinese => "变更文件：",
-        }
+        "Changed files:"
     }
 
     fn file_omitted_notice(&self) -> &'static str {
-        match self {
-            Language::English => "(content omitted)",
-            Language::Chinese => "（内容已省略）",
-        }
+        "(content omitted)"
     }
 
     fn file_snippet_heading(&self) -> &'static str {
-        match self {
-            Language::English => "File:",
-            Language::Chinese => "文件：",
-        }
+        "File:"
     }
 
     fn no_models_found(&self) -> &'static str {
-        match self {
-            Language::English => "No GGUF models found in default locations. Download a model first or provide its path manually.",
-            Language::Chinese => "在默认位置未找到 GGUF 模型。请先下载模型或手动提供其路径。",
-        }
+        "No GGUF models found in default locations. Download a model first or provide its path manually."
     }
 
     fn enter_model_path_hint(&self) -> &'static str {
-        match self {
-            Language::English => "Hint: place models under ./models or ~/Library/Application Support/git-ca/models (macOS) or ~/.cache/git-ca/models.",
-            Language::Chinese => "提示：可将模型放在 ./models、~/Library/Application Support/git-ca/models（macOS）或 ~/.cache/git-ca/models 等目录。",
-        }
+        "Hint: place models under ./models or ~/Library/Application Support/git-ca/models (macOS) or ~/.cache/git-ca/models."
     }
 
     fn model_file_missing(&self) -> &'static str {
-        match self {
-            Language::English => "Model file missing: {}",
-            Language::Chinese => "模型文件缺失：{}",
-        }
+        "Model file missing: {}"
     }
 
     fn model_extension_warning(&self) -> &'static str {
-        match self {
-            Language::English => "The file must have a .gguf extension.",
-            Language::Chinese => "文件必须为 .gguf 扩展名。",
-        }
+        "The file must have a .gguf extension."
     }
 
     fn download_model_prompt(&self) -> &'static str {
-        match self {
-            Language::English => "Download a GGUF model (for example from https://huggingface.co/collections/ggml-org/gguf) and retry.",
-            Language::Chinese => "请先下载 GGUF 模型（例如来自 https://huggingface.co/collections/ggml-org/gguf），然后重试。",
-        }
+        "Download a GGUF model (for example from https://huggingface.co/collections/ggml-org/gguf) and retry."
     }
 
     fn downloading_model(&self) -> &'static str {
-        match self {
-            Language::English => "Downloading model '{}' from Hugging Face...",
-            Language::Chinese => "正在从 Hugging Face 下载模型'{}'...",
-        }
+        "Downloading model '{}' from Hugging Face..."
     }
 
     fn download_completed(&self) -> &'static str {
-        match self {
-            Language::English => "Model downloaded to: {}",
-            Language::Chinese => "模型已下载至：{}",
-        }
+        "Model downloaded to: {}"
     }
 
     fn auto_downloading_default(&self) -> &'static str {
-        match self {
-            Language::English => "No local models found. Downloading default model '{}'...",
-            Language::Chinese => "未找到本地模型，正在下载默认模型'{}'...",
-        }
+        "No local models found. Downloading default model '{}'..."
     }
 
     fn model_pull_hint(&self) -> &'static str {
-        match self {
-            Language::English => {
-                "Tip: run 'git ca model pull [small|default|quality|<repo>]' to download a tier or custom GGUF."
-            }
-            Language::Chinese => {
-                "提示：运行 'git ca model pull [small|default|quality|<仓库>]' 可下载档位模型或自定义 GGUF。"
-            }
-        }
+        "Tip: run 'git ca model pull [small|default|quality|<repo>]' to download a tier or custom GGUF."
     }
 
     fn hardware_profile_label(&self) -> &'static str {
-        match self {
-            Language::English => "Hardware profile:",
-            Language::Chinese => "硬件概况：",
-        }
+        "Hardware profile:"
     }
 
     fn recommended_tier_label(&self) -> &'static str {
-        match self {
-            Language::English => "Recommended model tier: {}",
-            Language::Chinese => "推荐模型档位：{}",
-        }
+        "Recommended model tier: {}"
     }
 
     fn using_context_label(&self) -> &'static str {
-        match self {
-            Language::English => "Using context length: {} tokens",
-            Language::Chinese => "使用上下文长度：{} tokens",
-        }
+        "Using context length: {} tokens"
     }
 
     fn auto_selected_tier(&self) -> &'static str {
-        match self {
-            Language::English => "Auto-selected model tier '{}' based on system memory.",
-            Language::Chinese => "已根据系统内存自动选择模型档位“{}”。",
-        }
+        "Auto-selected model tier '{}' based on system memory."
     }
 
     fn tier_persisted(&self) -> &'static str {
-        match self {
-            Language::English => "Model tier preference saved: {}",
-            Language::Chinese => "模型档位偏好已保存：{}",
-        }
+        "Model tier preference saved: {}"
     }
 
     fn available_tiers(&self) -> &'static str {
-        match self {
-            Language::English => "Model tiers:",
-            Language::Chinese => "模型档位：",
-        }
+        "Model tiers:"
     }
 
     fn select_tier_prompt(&self) -> &'static str {
-        match self {
-            Language::English => {
-                "\nSelect a tier number, enter a GGUF path, or press Enter for the recommended tier: "
-            }
-            Language::Chinese => "\n输入档位编号、GGUF 路径，或直接回车使用推荐档位：",
-        }
+        "\nSelect a tier number, enter a GGUF path, or press Enter for the recommended tier: "
     }
 
     fn key_changes_heading(&self) -> &'static str {
-        match self {
-            Language::English => "Key changes:",
-            Language::Chinese => "关键变更：",
-        }
+        "Key changes:"
     }
 
     fn additional_snippets_heading(&self) -> &'static str {
-        match self {
-            Language::English => "Additional snippets:",
-            Language::Chinese => "补充片段：",
-        }
+        "Additional snippets:"
     }
 
     fn hierarchical_budget_notice(&self) -> &'static str {
-        match self {
-            Language::English => "[Lower-priority diff details omitted to fit context.]",
-            Language::Chinese => "[为适配上下文，已省略较低优先级的 diff 细节。]",
-        }
+        "[Lower-priority diff details omitted to fit context.]"
     }
 
     fn not_in_git_repository(&self) -> &'static str {
-        match self {
-            Language::English => "Not in a git repository",
-            Language::Chinese => "不在 git 仓库中",
-        }
+        "Not in a git repository"
     }
 }
 
@@ -667,12 +520,17 @@ fn get_diff() -> Result<String> {
     Ok(diff)
 }
 
-fn build_commit_prompt(diff: &str, language: &Language, attempt: usize) -> String {
-    match language {
-        Language::English => {
-            // `/no_think` disables Qwen3 thinking mode so the model returns only the commit line.
-            let mut prompt = format!(
-                r#"/no_think
+fn build_commit_prompt(diff: &str, attempt: usize, kind: PromptKind) -> String {
+    if kind == PromptKind::Committed {
+        return format!(
+            "<|im_start|>system\n{COMMITTED_SYSTEM_INSTRUCTION}<|im_end|>\n<|im_start|>user\nDiff:\n{diff}\n\n/no_think<|im_end|>\n<|im_start|>assistant\n"
+        );
+    }
+
+    {
+        // `/no_think` disables Qwen3 thinking mode so the model returns only the commit line.
+        let mut prompt = format!(
+            r#"/no_think
 SYSTEM: You are a commit message generator. You must output ONLY a commit message, nothing else.
 Do not reason out loud. Do not emit <think> blocks or chain-of-thought.
 
@@ -699,60 +557,15 @@ HERE IS THE DIFF:
 {diff}
 
 YOUR OUTPUT (commit message only):"#
+        );
+
+        if attempt > 0 {
+            prompt.push_str(
+                "\n\n/no_think\nCRITICAL: Previous output was invalid. You MUST output ONLY a commit message starting with '<type>(<scope>): <subject>'. NO other text, explanations, thinking, or formatting.",
             );
-
-            if attempt > 0 {
-                prompt.push_str(
-                    "\n\n/no_think\nCRITICAL: Previous output was invalid. You MUST output ONLY a commit message starting with '<type>(<scope>): <subject>'. NO other text, explanations, thinking, or formatting.",
-                );
-            }
-
-            prompt
         }
-        Language::Chinese => {
-            // `/no_think` 关闭 Qwen3 思考模式，避免输出 <think> 与冗长推理。
-            let mut prompt = format!(
-                r#"/no_think
-系统：这是一个**任务指令**，不是对话。你的任务是直接生成提交信息，**不要回复或回应任何指令**。
-不要思考过程，不要输出 <think> 块或链式推理。
 
-任务：分析以下 git diff，生成一个符合 Conventional Commits 规范的提交信息。
-
-**重要**：直接输出提交信息，**不要**说"好的"、"请使用..."、"我理解"等回复，直接生成即可。
-
-格式示例：
-feat(api): 添加用户认证接口
-fix(cli): 解决模型加载超时问题
-docs: 更新安装说明
-refactor(llama): 简化令牌采样逻辑
-chore(deps): 更新依赖包
-test: 添加 diff 解析单元测试
-style: 调整代码格式
-style(ui): 修改按钮颜色
-
-**必须遵循的规则**：
-1. <类型> 必须是以下之一：feat、fix、docs、style、refactor、test、chore
-2. <范围> 可选，使用 kebab-case（如 cli、api、docs、ui）
-3. <主题> 使用祈使语气，简练（≤72 字符）
-4. **绝对不要**输出任何解释、对话、回复、思考过程或额外文字
-5. **首行**必须是：`<类型>(<范围>): <主题>`
-6. **不要**使用markdown、不添加代码块、不加符号
-
-以下是需要分析的 diff：
-
-{diff}
-
-**请直接生成提交信息（不要任何回复、解释或思考）：**"#
-            );
-
-            if attempt > 0 {
-                prompt.push_str(
-                    "\n\n/no_think\n**严重错误**：上次输出不符合格式！**立即停止回复、对话和思考**，**必须**直接输出一个以 '<类型>(<范围>): <主题>' 开头的提交信息。**不要**说'好的'、'理解了'、'请重新试'等任何回复文字。",
-                );
-            }
-
-            prompt
-        }
+        prompt
     }
 }
 
@@ -768,15 +581,17 @@ fn analyze_diff(
     let mut session = LlamaSession::new(model_path, context_size).map_err(AppError::from)?;
     const MAX_ATTEMPTS: usize = 2;
 
-    let diff_variants = build_diff_variants(diff, language, context_size);
+    let prompt_kind = prompt_kind_for(model_path);
+    let diff_variants = build_diff_variants(diff, language, context_size, prompt_kind);
+    let grammar = (prompt_kind == PromptKind::Committed).then_some(COMMIT_GRAMMAR);
 
     for attempt in 0..MAX_ATTEMPTS {
         let fragment = diff_variants
             .get(attempt)
             .or_else(|| diff_variants.last())
             .unwrap();
-        let prompt = build_commit_prompt(fragment, language, attempt);
-        let response = match session.infer(&prompt, 256) {
+        let prompt = build_commit_prompt(fragment, attempt, prompt_kind);
+        let response = match session.infer(&prompt, 256, grammar) {
             Ok(output) => output,
             Err(err) => {
                 eprintln!("{err}");
@@ -793,7 +608,7 @@ fn analyze_diff(
         println!("{}", language.processing_response());
 
         if let Some(processed) = process_model_response(&response) {
-            if is_valid_commit_message(&processed, language) {
+            if is_valid_commit_message(&processed) {
                 println!("{processed}");
                 println!("{}", language.commit_message_generated());
                 return Ok(Some(processed));
@@ -923,13 +738,6 @@ fn looks_like_instruction(line: &str) -> bool {
         "do not add any",
         "commit message content must",
         "the commit message must",
-        "请仅返回",
-        "请只返回",
-        "记住：",
-        "记住：",
-        "请勿包含",
-        "回复中只能",
-        "请只提供",
     ];
 
     KEYWORDS.iter().any(|keyword| lower.contains(keyword))
@@ -1459,20 +1267,52 @@ fn build_diff_raw_tail(diff: &str, language: &Language, context_size: i32) -> St
     format!("{}\n\n{}", language.truncated_diff_notice(), trimmed)
 }
 
-fn build_diff_variants(diff: &str, language: &Language, context_size: i32) -> Vec<String> {
-    // Attempt 0: full hierarchical summary (L0+L1+L2).
-    let full = build_diff_summary(diff, language, context_size);
-    // Attempt 1: tighter view (L0+L1 only) for stricter retries.
-    let tight = build_hierarchical_diff_summary(diff, language, context_size, false);
-    if full.trim() == tight.trim() {
-        let raw = build_diff_raw_tail(diff, language, context_size);
-        if full.trim() == raw.trim() {
-            vec![full]
+fn build_diff_raw_head(diff: &str, language: &Language, context_size: i32) -> String {
+    let max_chars = prompt_diff_char_budget(context_size);
+
+    if diff.len() <= max_chars {
+        return diff.to_string();
+    }
+
+    let mut trimmed: String = diff.chars().take(max_chars).collect();
+    if let Some(pos) = trimmed.rfind("diff --git ") {
+        trimmed = trimmed[..pos].to_string();
+    }
+
+    format!("{trimmed}\n\n{}", language.truncated_diff_notice())
+}
+
+fn build_diff_variants(
+    diff: &str,
+    language: &Language,
+    context_size: i32,
+    kind: PromptKind,
+) -> Vec<String> {
+    if kind == PromptKind::Committed {
+        // committed was trained on near-raw single-file diffs — feed the raw
+        // head first, fall back to the hierarchical summary on retry.
+        let raw = build_diff_raw_head(diff, language, context_size);
+        let full = build_diff_summary(diff, language, context_size);
+        if raw.trim() == full.trim() {
+            vec![raw]
         } else {
-            vec![full, raw]
+            vec![raw, full]
         }
     } else {
-        vec![full, tight]
+        // Attempt 0: full hierarchical summary (L0+L1+L2).
+        let full = build_diff_summary(diff, language, context_size);
+        // Attempt 1: tighter view (L0+L1 only) for stricter retries.
+        let tight = build_hierarchical_diff_summary(diff, language, context_size, false);
+        if full.trim() == tight.trim() {
+            let raw = build_diff_raw_tail(diff, language, context_size);
+            if full.trim() == raw.trim() {
+                vec![full]
+            } else {
+                vec![full, raw]
+            }
+        } else {
+            vec![full, tight]
+        }
     }
 }
 
@@ -1553,51 +1393,32 @@ enum SubjectTemplate {
     UpdateDeps,
 }
 
-fn build_subject(language: &Language, template: SubjectTemplate, scope: &str) -> String {
-    match (language, template) {
-        (Language::English, SubjectTemplate::StabilizeCommitGeneration) => {
+fn build_subject(template: SubjectTemplate, scope: &str) -> String {
+    match template {
+        SubjectTemplate::StabilizeCommitGeneration => {
             "stabilize commit message generation".to_string()
         }
-        (Language::Chinese, SubjectTemplate::StabilizeCommitGeneration) => {
-            "稳定提交信息生成流程".to_string()
-        }
-        (Language::English, SubjectTemplate::UpdateDeps) => "update dependencies".to_string(),
-        (Language::Chinese, SubjectTemplate::UpdateDeps) => "更新依赖".to_string(),
-        (Language::English, SubjectTemplate::SyncDocsAndCode) => {
-            "align docs and code changes".to_string()
-        }
-        (Language::Chinese, SubjectTemplate::SyncDocsAndCode) => "同步文档与代码更新".to_string(),
-        (Language::English, SubjectTemplate::UpdateDocs) => {
+        SubjectTemplate::UpdateDeps => "update dependencies".to_string(),
+        SubjectTemplate::SyncDocsAndCode => "align docs and code changes".to_string(),
+        SubjectTemplate::UpdateDocs => {
             format!("update {} documentation", scope)
         }
-        (Language::Chinese, SubjectTemplate::UpdateDocs) => {
-            format!("更新{}文档", scope)
-        }
-        (Language::English, SubjectTemplate::IntroduceScope) => format!("add {}", scope),
-        (Language::Chinese, SubjectTemplate::IntroduceScope) => format!("新增{}", scope),
-        (Language::English, SubjectTemplate::RefineScope) => format!("refine {}", scope),
-        (Language::Chinese, SubjectTemplate::RefineScope) => format!("优化{}", scope),
-        (Language::English, SubjectTemplate::UpdateScope) => format!("update {}", scope),
-        (Language::Chinese, SubjectTemplate::UpdateScope) => format!("更新{}", scope),
+        SubjectTemplate::IntroduceScope => format!("add {}", scope),
+        SubjectTemplate::RefineScope => format!("refine {}", scope),
+        SubjectTemplate::UpdateScope => format!("update {}", scope),
     }
 }
 
-fn build_scope_readable(scopes: &[String], language: &Language) -> String {
+fn build_scope_readable(scopes: &[String]) -> String {
     if scopes.is_empty() {
-        return match language {
-            Language::English => "project".to_string(),
-            Language::Chinese => "项目".to_string(),
-        };
+        return "project".to_string();
     }
 
     let words: Vec<String> = scopes.iter().map(|slug| humanize_slug(slug)).collect();
-    match (language, words.len()) {
-        (Language::English, 1) => words[0].clone(),
-        (Language::English, 2) => format!("{} and {}", words[0], words[1]),
-        (Language::English, _) => format!("{} and more", words[0]),
-        (Language::Chinese, 1) => words[0].clone(),
-        (Language::Chinese, 2) => format!("{}和{}", words[0], words[1]),
-        (Language::Chinese, _) => format!("{}等", words[0]),
+    match words.len() {
+        1 => words[0].clone(),
+        2 => format!("{} and {}", words[0], words[1]),
+        _ => format!("{} and more", words[0]),
     }
 }
 
@@ -1653,7 +1474,7 @@ fn compute_scopes(summary: &DiffSummary) -> Vec<String> {
     scopes
 }
 
-fn generate_fallback_commit_message(diff: &str, language: &Language) -> Option<String> {
+fn generate_fallback_commit_message(diff: &str) -> Option<String> {
     let summary = analyze_diff_summary(diff);
     if summary.files.is_empty() {
         return None;
@@ -1693,8 +1514,8 @@ fn generate_fallback_commit_message(diff: &str, language: &Language) -> Option<S
     }
 
     let scope_slug = build_scope_slug(&scopes);
-    let scope_readable = build_scope_readable(&scopes, language);
-    let subject = build_subject(language, template, &scope_readable);
+    let scope_readable = build_scope_readable(&scopes);
+    let subject = build_subject(template, &scope_readable);
 
     Some(if scope_slug.is_empty() {
         format!("{commit_type}: {subject}")
@@ -1702,7 +1523,7 @@ fn generate_fallback_commit_message(diff: &str, language: &Language) -> Option<S
         format!("{commit_type}({scope_slug}): {subject}")
     })
 }
-fn is_valid_commit_message(message: &str, language: &Language) -> bool {
+fn is_valid_commit_message(message: &str) -> bool {
     let subject_line = message
         .lines()
         .map(|line| line.trim())
@@ -1717,13 +1538,7 @@ fn is_valid_commit_message(message: &str, language: &Language) -> bool {
         return false;
     }
 
-    if let Language::English = language {
-        if !subject_line.is_ascii() {
-            return false;
-        }
-    }
-
-    true
+    subject_line.is_ascii()
 }
 
 fn parse_commit_subject(line: &str) -> Option<(&'static str, Option<&str>, &str)> {
@@ -1792,39 +1607,6 @@ impl GitConfig {
             }
         }
     }
-}
-
-fn select_language(git_config: &mut GitConfig) -> Result<Language> {
-    let current_lang = get_language(git_config);
-    println!("{}", current_lang.available_languages());
-    println!("1. English");
-    println!("2. 简体中文");
-
-    let choice = loop {
-        let input = get_user_input(current_lang.select_language_prompt())?;
-        match input.parse::<usize>() {
-            Ok(1) => break Language::English,
-            Ok(2) => break Language::Chinese,
-            _ => println!("{}", current_lang.invalid_selection()),
-        }
-    };
-
-    git_config.set(CONFIG_LANGUAGE_KEY, choice.to_string())?;
-    println!(
-        "{}",
-        choice
-            .language_set_to()
-            .replace("{}", choice.display_name())
-    );
-    Ok(choice)
-}
-
-fn get_language(git_config: &GitConfig) -> Language {
-    git_config
-        .get(CONFIG_LANGUAGE_KEY)
-        .ok()
-        .and_then(|lang| Language::from_str(&lang))
-        .unwrap_or(Language::English)
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -2018,7 +1800,11 @@ fn pick_gguf_filename<'a>(siblings: impl Iterator<Item = &'a str>) -> Option<&'a
     q4_k_m.or(q4).or(fallback)
 }
 
-fn download_model_from_hub(repo_id: &str, language: &Language) -> Result<PathBuf> {
+fn download_model_from_hub(
+    repo_id: &str,
+    language: &Language,
+    preferred_file: Option<&str>,
+) -> Result<PathBuf> {
     let api = Api::new()
         .map_err(|e| AppError::Custom(format!("Failed to initialize Hugging Face client: {e}")))?;
     let repo = api.model(repo_id.to_string());
@@ -2028,10 +1814,23 @@ fn download_model_from_hub(repo_id: &str, language: &Language) -> Result<PathBuf
         ))
     })?;
 
-    let filename = pick_gguf_filename(info.siblings.iter().map(|s| s.rfilename.as_str()))
-        .ok_or_else(|| {
-            AppError::Custom(format!("No GGUF files found in repository '{repo_id}'"))
-        })?;
+    let filename = match preferred_file {
+        // The default repo ships a baseline GGUF alongside the fine-tuned one —
+        // pin the exact file so the heuristic can't pick the wrong sibling.
+        Some(want) => info
+            .siblings
+            .iter()
+            .map(|s| s.rfilename.as_str())
+            .find(|name| *name == want)
+            .ok_or_else(|| {
+                AppError::Custom(format!(
+                    "Expected file '{want}' not found in repository '{repo_id}'"
+                ))
+            })?,
+        None => pick_gguf_filename(info.siblings.iter().map(|s| s.rfilename.as_str())).ok_or_else(
+            || AppError::Custom(format!("No GGUF files found in repository '{repo_id}'")),
+        )?,
+    };
 
     println!("{}", language.downloading_model().replace("{}", repo_id));
     let source_path = repo.get(filename).map_err(|e| {
@@ -2089,20 +1888,16 @@ fn print_hardware_profile(language: &Language, hardware: &HardwareProfile) {
     );
 }
 
-fn ensure_default_model(language: &Language, tier: ModelTier) -> Result<Option<PathBuf>> {
+fn ensure_default_model(language: &Language) -> Result<Option<PathBuf>> {
     if find_local_models().is_empty() {
-        let repo = tier.repo_id();
         println!(
             "{}",
             language
-                .auto_selected_tier()
-                .replace("{}", tier.display_name())
+                .auto_downloading_default()
+                .replace("{}", DEFAULT_MODEL_REPO)
         );
-        println!(
-            "{}",
-            language.auto_downloading_default().replace("{}", repo)
-        );
-        let downloaded = download_model_from_hub(repo, language)?;
+        let downloaded =
+            download_model_from_hub(DEFAULT_MODEL_REPO, language, Some(DEFAULT_MODEL_FILE))?;
         let canonical = fs::canonicalize(&downloaded).unwrap_or(downloaded);
         persist_model_path(&canonical);
         println!(
@@ -2140,7 +1935,7 @@ fn get_model_path(language: &Language, tier: ModelTier) -> Result<PathBuf> {
         }
     }
 
-    if let Some(downloaded) = ensure_default_model(language, tier)? {
+    if let Some(downloaded) = ensure_default_model(language)? {
         return Ok(downloaded);
     }
 
@@ -2210,7 +2005,7 @@ fn select_model_path(language: &Language, recommended_tier: ModelTier) -> Result
             );
             return Ok(canonical);
         }
-        let downloaded = download_model_from_hub(recommended_tier.repo_id(), language)?;
+        let downloaded = download_model_from_hub(recommended_tier.repo_id(), language, None)?;
         let canonical = fs::canonicalize(&downloaded).unwrap_or(downloaded);
         persist_model_path(&canonical);
         return Ok(canonical);
@@ -2241,7 +2036,7 @@ fn select_model_path(language: &Language, recommended_tier: ModelTier) -> Result
 
         // Empty / Enter → download recommended tier.
         if trimmed.is_empty() {
-            let downloaded = download_model_from_hub(recommended_tier.repo_id(), language)?;
+            let downloaded = download_model_from_hub(recommended_tier.repo_id(), language, None)?;
             let canonical = fs::canonicalize(&downloaded).unwrap_or(downloaded);
             persist_model_path(&canonical);
             println!(
@@ -2255,7 +2050,7 @@ fn select_model_path(language: &Language, recommended_tier: ModelTier) -> Result
 
         // Tier by name or 1–3.
         if let Some(tier) = ModelTier::from_str(trimmed) {
-            let downloaded = download_model_from_hub(tier.repo_id(), language)?;
+            let downloaded = download_model_from_hub(tier.repo_id(), language, None)?;
             let canonical = fs::canonicalize(&downloaded).unwrap_or(downloaded);
             persist_model_path(&canonical);
             println!(
@@ -2269,7 +2064,7 @@ fn select_model_path(language: &Language, recommended_tier: ModelTier) -> Result
         if let Ok(index) = trimmed.parse::<usize>() {
             if (1..=3).contains(&index) {
                 let tier = ModelTier::all()[index - 1];
-                let downloaded = download_model_from_hub(tier.repo_id(), language)?;
+                let downloaded = download_model_from_hub(tier.repo_id(), language, None)?;
                 let canonical = fs::canonicalize(&downloaded).unwrap_or(downloaded);
                 persist_model_path(&canonical);
                 println!(
@@ -2365,30 +2160,16 @@ mod tests {
 
     #[test]
     fn validates_conventional_commit_subject() {
-        assert!(is_valid_commit_message(
-            "feat(cli): improve prompts",
-            &Language::English
-        ));
-        assert!(is_valid_commit_message(
-            "docs: 更新贡献指南",
-            &Language::Chinese
-        ));
+        assert!(is_valid_commit_message("feat(cli): improve prompts"));
+        assert!(is_valid_commit_message("docs: update contribution guide"));
     }
 
     #[test]
     fn rejects_invalid_commit_messages() {
-        assert!(!is_valid_commit_message(
-            "Implement new feature",
-            &Language::English
-        ));
-        assert!(!is_valid_commit_message(
-            "feat(): missing subject",
-            &Language::English
-        ));
-        assert!(!is_valid_commit_message(
-            "feat(cli) missing colon",
-            &Language::English
-        ));
+        assert!(!is_valid_commit_message("Implement new feature"));
+        assert!(!is_valid_commit_message("feat(): missing subject"));
+        assert!(!is_valid_commit_message("feat(cli) missing colon"));
+        assert!(!is_valid_commit_message("docs: 更新贡献指南"));
     }
 
     #[test]
@@ -2401,7 +2182,7 @@ index 1111111..2222222 100644
 @@
 + println!(\"Model response was invalid. Retrying with stricter instructions...\");
 ";
-        let message = generate_fallback_commit_message(diff, &Language::English).expect("fallback");
+        let message = generate_fallback_commit_message(diff).expect("fallback");
         assert!(message.starts_with("fix("));
         assert!(message.contains("stabilize commit message generation"));
     }
@@ -2417,8 +2198,7 @@ index 0000000..3333333
 @@
 +# Repository Guidelines
 ";
-        let message =
-            generate_fallback_commit_message(diff, &Language::English).expect("fallback docs");
+        let message = generate_fallback_commit_message(diff).expect("fallback docs");
         assert!(message.starts_with("docs("));
         assert!(message.contains("documentation"));
     }
@@ -2440,8 +2220,7 @@ index 0000000..3333333
 @@
 + llama_kv_self_clear(ctx);
 ";
-        let message =
-            generate_fallback_commit_message(diff, &Language::English).expect("fallback runtime");
+        let message = generate_fallback_commit_message(diff).expect("fallback runtime");
         assert!(message.starts_with("fix("));
         assert!(
             message.contains("stabilize commit message generation") || message.contains("refine")
@@ -2464,14 +2243,13 @@ index 0000000..3333333
             "@@\n",
             "+packages:\n",
         );
-        let message =
-            generate_fallback_commit_message(diff, &Language::English).expect("fallback deps");
+        let message = generate_fallback_commit_message(diff).expect("fallback deps");
         assert_eq!(message, "chore(deps): update dependencies");
     }
 
     #[test]
     fn truncates_diff_for_prompt() {
-        let language = Language::English;
+        let language = Language;
         let long_diff = format!(
             "diff --git a/file b/file\n--- a/file\n+++ b/file\n@@\n+{}\n",
             "a".repeat(5000)
@@ -2487,7 +2265,7 @@ index 0000000..3333333
 
     #[test]
     fn hierarchical_summary_includes_l0_inventory() {
-        let language = Language::English;
+        let language = Language;
         let diff = "\
 diff --git a/src/api.ts b/src/api.ts
 --- a/src/api.ts
@@ -2509,7 +2287,7 @@ diff --git a/src/ui.tsx b/src/ui.tsx
 
     #[test]
     fn hierarchical_retry_variant_can_drop_l2() {
-        let language = Language::English;
+        let language = Language;
         let mut body = String::new();
         for i in 0..40 {
             body.push_str(&format!("+const value_{i} = {i};\n"));
@@ -2517,7 +2295,7 @@ diff --git a/src/ui.tsx b/src/ui.tsx
         let diff = format!(
             "diff --git a/src/lib.ts b/src/lib.ts\n--- a/src/lib.ts\n+++ b/src/lib.ts\n@@\n+export function main() {{}}\n{body}"
         );
-        let variants = build_diff_variants(&diff, &language, 2048);
+        let variants = build_diff_variants(&diff, &language, 2048, PromptKind::Legacy);
         assert!(!variants.is_empty());
         assert!(variants[0].contains(language.changed_files_heading()));
     }
@@ -2549,15 +2327,17 @@ diff --git a/src/ui.tsx b/src/ui.tsx
 
     #[test]
     fn commit_prompt_disables_qwen3_thinking() {
-        let prompt = build_commit_prompt("diff --git a/x b/x\n", &Language::English, 0);
+        let prompt = build_commit_prompt("diff --git a/x b/x\n", 0, PromptKind::Legacy);
         assert!(prompt.starts_with("/no_think") || prompt.contains("/no_think"));
         assert!(prompt.contains("NO thinking") || prompt.contains("Do not emit <think>"));
 
-        let retry = build_commit_prompt("diff --git a/x b/x\n", &Language::English, 1);
+        let retry = build_commit_prompt("diff --git a/x b/x\n", 1, PromptKind::Legacy);
         assert!(retry.matches("/no_think").count() >= 2);
 
-        let zh = build_commit_prompt("diff --git a/x b/x\n", &Language::Chinese, 0);
-        assert!(zh.contains("/no_think"));
+        let committed = build_commit_prompt("diff --git a/x b/x\n", 0, PromptKind::Committed);
+        assert!(committed.contains("<|im_start|>system"));
+        assert!(committed.contains("/no_think"));
+        assert!(committed.contains("<|im_start|>assistant\n"));
     }
 
     #[test]
@@ -2608,7 +2388,7 @@ fn main() -> Result<()> {
     }
 
     let mut git_config = GitConfig::new()?;
-    let language = get_language(&git_config);
+    let language = Language;
     let hardware = HardwareProfile::detect();
     let model_tier = resolve_model_tier(&git_config, &hardware);
     let context_size = resolve_context_size(&git_config, &hardware);
@@ -2643,7 +2423,7 @@ fn main() -> Result<()> {
                             }
                         }
                     };
-                    let downloaded = download_model_from_hub(&repo_id, &language)?;
+                    let downloaded = download_model_from_hub(&repo_id, &language, None)?;
                     persist_model_path(&downloaded);
                     if let Some(tier) = tier_for_config {
                         let _ = git_config.set(CONFIG_MODEL_TIER_KEY, tier.as_str());
@@ -2663,10 +2443,6 @@ fn main() -> Result<()> {
                     select_model_path(&language, model_tier)?;
                     return Ok(());
                 }
-            }
-            "language" => {
-                select_language(&mut git_config)?;
-                return Ok(());
             }
             _ => {}
         }
@@ -2699,7 +2475,7 @@ fn main() -> Result<()> {
     let mut commit_msg = match analyze_diff(&diff, &model_path, &language, context_size)? {
         Some(msg) => msg,
         None => {
-            if let Some(fallback) = generate_fallback_commit_message(&diff, &language) {
+            if let Some(fallback) = generate_fallback_commit_message(&diff) {
                 println!("{}", language.fallback_commit_generated());
                 println!("{fallback}");
                 fallback
@@ -2797,18 +2573,12 @@ fn run_doctor(
 
     let mut session = LlamaSession::new(&model_path, context_size).map_err(AppError::from)?;
 
-    let prompt = match language {
-        Language::English => {
-            "You are a helpful assistant. Reply with a short greeting that confirms the model is working, e.g. \"Model ok\".".to_string()
-        }
-        Language::Chinese => {
-            "你是一个乐于助人的助手。请用简短的话确认模型正常工作，例如“模型正常”。".to_string()
-        }
-    };
+    let prompt =
+        "You are a helpful assistant. Reply with a short greeting that confirms the model is working, e.g. \"Model ok\".".to_string();
 
     println!("\nPrompt:\n{}\n", prompt);
 
-    let response = session.infer(&prompt, 64).map_err(AppError::from)?;
+    let response = session.infer(&prompt, 64, None).map_err(AppError::from)?;
     println!("Model response:\n{}\n", response.trim());
 
     Ok(())
