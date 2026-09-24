@@ -2,25 +2,28 @@
 
 [中文](README_ZH.md) · [Français](README_FR.md) · [Español](README_ES.md)
 
-Git Commit Analyzer is a Rust-based Git plugin that generates Conventional Commits-compatible `type(scope): subject` messages from your staged diff using a local llama.cpp model. The CLI summarises large diffs, validates model output, and falls back to deterministic messages when needed. Git Flow is a separate branch workflow and is not what this CLI generates.
-
-## Official links
-
 - Official website: https://zhanghe.dev/products/git-commit-analyzer
 - Releases: https://github.com/zh30/git-commit-analyzer/releases
+
+Git Commit Analyzer is a Rust-based Git plugin that generates Conventional
+Commits messages from your staged diff using a local llama.cpp model. The CLI
+summarises large diffs, validates model output, and falls back to deterministic
+messages when needed.
 
 ## Key Features
 
 - **Local inference**: Uses `llama_cpp_sys_2` to run GGUF models without any remote API calls.
-- **Smart diff summarisation**: Large lockfiles and generated assets are reduced to concise summaries before prompting.
-- **Conventional Commits enforcement**: Ensures responses match `<type>(<scope>): <subject>` and retries/falls back when they don't.
+- **Task-tuned default model**: Auto-downloads `committed-0.6b` (a Qwen3-0.6B fine-tune trained for Conventional Commits) on first run; official Qwen3 tiers stay available via `git ca model pull`.
+- **Adaptive context**: Sizes the llama.cpp context from system memory (4K–16K tokens).
+- **Hierarchical diff packing**: Multi-file commits keep an inventory + key signatures before filling leftover budget with snippets.
+- **Conventional Commits validation**: Grammar-constrained decoding keeps output at `<type>(<scope>): <subject>`, with retry/fallback when needed.
 - **Interactive CLI**: Review, edit, or cancel the generated commit message.
 - **Multi-platform support**: Pre-built binaries for macOS (Intel & Apple Silicon).
 
 ## Requirements
 
 - Git 2.30+
-- A local GGUF model (the CLI can download the default `marzoukbaig14/committed-gguf-0.6b`)
+- A local GGUF model (the CLI can auto-download `marzoukbaig14/committed-gguf-0.6b` from Hugging Face)
 
 ## Installation
 
@@ -38,7 +41,18 @@ This installs a pre-built binary for your platform:
 
 **No Rust toolchain or compilation needed!** The binary is automatically downloaded from GitHub Releases.
 
-**Note**: Linux builds are temporarily disabled due to compilation issues. Windows builds are available via [GitHub Releases](https://github.com/zh30/git-commit-analyzer/releases) but not distributed via Homebrew.
+**Note**: If you encounter a version mismatch error, try:
+```bash
+brew update
+brew upgrade git-ca
+```
+
+Or install from source:
+```bash
+brew install --build-from-source git-ca
+```
+
+Linux builds are temporarily disabled due to compilation issues. Windows builds are available via [GitHub Releases](https://github.com/zh30/git-commit-analyzer/releases) but not distributed via Homebrew.
 
 ### Manual Installation
 
@@ -46,7 +60,7 @@ Download the appropriate binary for your platform from [Releases](https://github
 
 ```bash
 # macOS (Apple Silicon)
-curl -L -o git-ca.tar.gz https://github.com/zh30/git-commit-analyzer/releases/download/v1.1.2/git-ca-1.1.2-apple-darwin-arm64.tar.gz
+curl -L -o git-ca.tar.gz https://github.com/zh30/git-commit-analyzer/releases/download/v2.0.12/git-ca-2.0.12-apple-darwin-arm64.tar.gz
 tar -xzf git-ca.tar.gz
 sudo mv git-ca /usr/local/bin/
 chmod +x /usr/local/bin/git-ca
@@ -75,19 +89,22 @@ bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
 
 On first run the CLI will:
 
-1. **Scan for models** in common directories:
+1. **Probe system memory** to size the context window (4K–16K tokens).
+
+2. **Scan for models** in common directories:
    - `./models` (project directory)
    - `~/.cache/git-ca/models` (Linux/macOS)
    - `~/.local/share/git-ca/models` (Linux alt)
    - `~/Library/Application Support/git-ca/models` (macOS)
 
-2. **Download default model** automatically if none found:
-   - Downloads `marzoukbaig14/committed-gguf-0.6b` from Hugging Face
-   - Stores it in `~/.cache/git-ca/models/`
+3. **Download the default model** automatically if none found: `marzoukbaig14/committed-gguf-0.6b` (Q4_K_M GGUF, ~397 MB, a Qwen3-0.6B fine-tune for Conventional Commits) into `~/.cache/git-ca/models/`.
 
-3. **Prompt for confirmation** if multiple models are found:
+4. **Prompt interactively** when multiple models/tiers are available:
    ```bash
-   git ca model  # Interactive model selector
+   git ca model              # Interactive selector (tiers + local GGUFs)
+   git ca model pull         # Download the recommended Qwen3 tier
+   git ca model pull quality # Force a specific tier (small|default|quality)
+   git ca model pull <repo>  # Pull a custom HF GGUF repo
    ```
 
 ## Usage
@@ -99,16 +116,24 @@ git ca
 
 For each invocation:
 
-1. The staged diff is summarised (lockfiles and large assets are listed but not inlined).
+1. The staged diff is packed hierarchically (file inventory → key signatures → extra snippets) to fit the adaptive context window.
 2. The llama.cpp model generates a commit message.
-3. Invalid output triggers a stricter retry; if still invalid, a deterministic fallback is offered.
+3. Invalid output triggers a stricter retry with a tighter diff view; if still invalid, a deterministic fallback is offered.
 4. Choose to **use**, **edit**, or **cancel** the message.
 
 ### Configuration Commands
 
-- `git ca model` — Interactive model selector
-- `git ca doctor` — Test model loading and inference
+- `git ca model` — Interactive model / tier selector
+- `git ca model pull [small|default|quality|<repo>]` — Download a tier or custom HF GGUF repo
+- `git ca doctor` — Hardware profile + model loading smoke test
 - `git ca --version` — Display version information
+
+Optional git config overrides:
+
+```bash
+git config --global commit-analyzer.model-tier default   # small | default | quality
+git config --global commit-analyzer.context 8192         # token context length
+```
 
 ## Development
 

@@ -9,7 +9,7 @@ The CLI entrypoint, prompt workflow, and llama.cpp bindings live in `src/main.rs
 - `cargo fmt` — enforce rustfmt defaults (4-space indent, 100-column width).
 - `cargo clippy -- -D warnings` — lint with warnings treated as build failures.
 - `cargo test` — execute all unit tests; run before every commit and PR.
-- Llama.cpp context length is fixed to 4096 tokens.
+- Context length is adaptive (typically 4K–16K) based on detected RAM and model tier; override with git config `commit-analyzer.context`.
 
 ## Coding Style & Naming Conventions
 Use `snake_case` for functions/files, `CamelCase` for types/enums, and `SCREAMING_SNAKE_CASE` for constants such as `COMMIT_TYPES`. Let rustfmt manage alignment and spacing. Prefer error propagation with `?`, returning `AppError::Custom` only when you need a user-facing message. Comments should explain non-obvious Git plumbing or llama-specific constraints; avoid restating what the code already conveys.
@@ -21,4 +21,10 @@ Unit tests live in `#[cfg(test)]` modules with descriptive names like `handles_r
 Follow the existing Conventional Commit style—examples include `feat(cli): simplify prompt`, `fix(llama): handle kv cache reset`, `chore(deps): update dependencies`. Each PR must summarise behavior changes, list verification steps (tests, manual runs), and update affected docs (`README*.md`, `DEPLOY.md`, `CLAUDE.md`). Link relevant issues and include terminal captures when altering user-visible prompts or installer UX.
 
 ## Model & Configuration Tips
-By default the tool scans `./models` and cache directories for llama.cpp-compatible GGUF files, persists the user's selection, and reuses it on subsequent runs. Non-interactive invocations reuse the stored model or fall back to the first discovered GGUF. Document any alternative endpoints or model defaults in `DEPLOY.md` before merging. Store credentials in ignored env files, not in tracked sources, and confirm large lockfiles remain ignored or summarized automatically by the diff truncation logic.
+The default model `marzoukbaig14/committed-gguf-0.6b` (Qwen3-0.6B fine-tune, pinned `committed-0.6b-finetuned-Q4_K_M.gguf`) auto-downloads when no local GGUF exists. Hardware probing still recommends pull tiers and sizes the context window:
+- `small` → Qwen3-0.6B (~4K ctx) for low-RAM machines
+- `default` → Qwen3-1.7B (~8K ctx) balanced
+- `quality` → Qwen3-4B (~16K ctx) when memory allows
+- `committed-*` models use their ChatML training recipe plus GBNF grammar; other models get the generic `/no_think` prompt so Qwen3 skips chain-of-thought
+
+Use `git ca model pull [small|default|quality|<repo>]` to download. Prefer git config keys `commit-analyzer.model-tier` and `commit-analyzer.context` for overrides. Local models are still scanned under `./models` and cache dirs; a persisted path wins when valid. Diff packing is hierarchical (L0 inventory → L1 key lines → L2 snippets) so multi-file commits fit the adaptive context budget.

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Purpose**: CLI helper that generates Git Flow–style commit messages from staged changes using local llama.cpp inference.
+**Purpose**: CLI helper that generates Conventional Commits messages from staged changes using local llama.cpp inference.
 
 **Runtime**: Pure Rust binary (`bin = "git-ca"`). No web services or VS Code extension.
 
@@ -26,48 +26,56 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 
 ### Core Components
 
-**1. CLI Orchestration (`main.rs:1867-2028`)**
+**1. CLI Orchestration (src/main.rs)**
 - Parses command-line arguments (doctor, model commands)
 - Orchestrates the entire workflow
 - Handles user interactions for commit confirmation
 
-**2. Model Management (`main.rs:1363-1718`)**
+**2. Model Management (src/main.rs)**
+- Default model: `marzoukbaig14/committed-gguf-0.6b` (pinned `committed-0.6b-finetuned-Q4_K_M.gguf`, a Qwen3-0.6B fine-tune for Conventional Commits) auto-downloaded when no local GGUF exists
+- Hardware probe (`detect_total_memory_mib`) recommends a pull tier and sizes the context:
+  - `small` → `Qwen/Qwen3-0.6B-GGUF` (~4K ctx)
+  - `default` → `Qwen/Qwen3-1.7B-GGUF` (~8K ctx)
+  - `quality` → `Qwen/Qwen3-4B-GGUF` (~16K ctx)
+  - Non-committed prompts prefix `/no_think` to disable Qwen3 thinking mode
+- Git config overrides: `commit-analyzer.model-tier`, `commit-analyzer.context`
 - Scans default directories for GGUF files:
   - `./models` (project directory)
   - `~/.cache/git-ca/models` (Linux)
   - `~/.local/share/git-ca/models` (Linux alt)
   - `~/Library/Application Support/git-ca/models` (macOS)
-- Downloads default model (`marzoukbaig14/committed-gguf-0.6b`, a Qwen3-0.6B fine-tune for Conventional Commits, `committed-0.6b-finetuned-Q4_K_M.gguf`) from Hugging Face if none found
 - Persists selection to `~/.cache/git-ca/default-model.path` or `.git-ca/default-model.path`
+- CLI: `git ca model pull [small|default|quality|<repo>]`
 
-**3. Diff Processing (`main.rs:414-962`)**
+**3. Diff Processing (src/main.rs)**
 - **Retrieval**: `get_diff()` - uses `git diff --cached` to get staged changes
 - **Analysis**: `analyze_diff_summary()` - parses diff to extract file types, scope candidates, detect patterns
-- **Summarization**: `build_diff_summary()` - reduces large diffs to concise summaries with snippets
-- **Variants**: `build_diff_variants()` - creates summary and raw variants for retry attempts
+- **Hierarchical summarization** (`build_hierarchical_diff_summary`):
+  - L0: file inventory with +/- counts
+  - L1: key signatures / high-signal hunks (budget-first)
+  - L2: additional snippets from high-churn files when budget remains
+- **Variants**: `build_diff_variants()` - committed models get near-raw diff head then hierarchy; other models get full hierarchy then L0+L1-only (or raw tail) for retries
 
-**4. Prompt Engineering (`main.rs:421-488`)**
-- `prompt_kind_for()` selects the prompt style from the model filename: `committed-*` GGUFs get the Committed recipe (ChatML template + fixed system instruction + `/no_think`), all other models get the generic plain-text prompt
-- Committed prompts feed the near-raw diff head (matching its `Diff:\n{diff}` training input); legacy prompts keep the summarized variant first
-- Enforces Git Flow format: `<type>(<scope>): <subject>`
+**4. Prompt Engineering (src/main.rs)**
+- `prompt_kind_for()` picks the recipe from the model filename: `committed-*` GGUFs get ChatML + fixed system instruction + `/no_think` (their training format); other models get the generic `/no_think` plain-text prompt
+- English-only prompts; enforces Conventional Commits format: `<type>(<scope>): <subject>`
 - Includes strict validation rules
 - Stricter retry prompts on subsequent attempts
 
-**5. Model Inference (`llama.rs:48-432`)**
+**5. Model Inference (src/llama.rs)**
 - **Session Management**: `LlamaSession::new()` - loads GGUF model, initializes context
 - **Tokenization**: Handles prompt encoding with buffer resizing
-- **Generation**: Token-by-token sampling with temperature/top-k/top-p
-- **Grammar**: Optional GBNF grammar (`COMMIT_GRAMMAR`) via `llama_sampler_init_grammar` constrains committed-model output to `type(scope)?: subject`; the `type` codebook is limited to `COMMIT_TYPES` at decode time
+- **Generation**: Token-by-token sampling with temperature 0.2 / top-k / top-p (stable structured output); optional GBNF grammar (`COMMIT_GRAMMAR`) via `llama_sampler_init_grammar` constrains committed-model output to the project's 7 commit types at decode time
 - **Chunked Decoding**: Processes long prompts in 256-token chunks
-- **Context Management**: Clears KV cache between runs, respects the 4096-token limit
+- **Context Management**: Clears KV cache between runs; adaptive n_ctx (4K–16K typical); n_batch capped at 512
 
-**6. Response Processing (`main.rs:546-667`)**
+**6. Response Processing (src/main.rs)**
 - Strips `<thinking>` blocks if present
-- Extracts commit subject line matching Git Flow pattern
+- Extracts commit subject line matching the Conventional Commits pattern
 - Collects body text until instruction keywords detected
 - Validates against `COMMIT_TYPES` array
 
-**7. Fallback Generation (`main.rs:1141-1189`)**
+**7. Fallback Generation (src/main.rs)**
 - Deterministic commit synthesis when model fails
 - Analyzes diff summary to determine:
   - **Type**: feat, fix, docs, chore, etc.
@@ -75,8 +83,8 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
   - **Subject**: from template enum based on context
 - Handles special cases: dependency updates, runtime changes, retry patterns
 
-**8. Validation (`main.rs:1190-1239`)**
-- `is_valid_commit_message()` - enforces Git Flow format
+**8. Validation (src/main.rs)**
+- `is_valid_commit_message()` - enforces Conventional Commits format
 - `parse_commit_subject()` - extracts type, optional scope, and subject
 - Subject line must be ASCII
 - Triggers retry loop on invalid output
@@ -91,76 +99,19 @@ Commit Creation ← Message Validation ← Response Processing ← Model Inferen
 ## Source Layout
 
 - `src/main.rs` — CLI entrypoint, Git integration, diff summarizer, fallback commit generator
-  - **Lines 1-400**: `Language` UI string helpers (English only)
-  - **Lines 414-962**: Diff processing functions
-  - **Lines 421-544**: Prompt building and model interaction
-  - **Lines 1141-1189**: Fallback generation logic
-  - **Lines 1720-1865**: Unit tests
-  - **Lines 1867-2028**: main() and command routing
+  - `Language` UI string helpers (English only)
+  - Diff processing functions
+  - Prompt building and model interaction
+  - Fallback generation logic
+  - Unit tests
+  - main() and command routing
 
 - `src/llama.rs` — llama.cpp session wrapper
-  - **Lines 48-110**: `LlamaSession::new()` - model loading and context setup
-  - **Lines 112-229**: `infer()` - prompt processing and text generation
-  - **Lines 231-272**: `decode_sequence()` - chunked prompt decoding
-  - **Lines 274-384**: `sample_next_token()` - sampling with temperature/top-k/top-p
-  - **Lines 386-413**: `token_to_string()` - detokenization
-  - **Lines 416-432**: Drop implementation for cleanup
-
-## Configuration
-
-- **Llama context length**: Fixed to 4096 tokens (`DEFAULT_CONTEXT_SIZE`)
-- **Model persistence**: Paths stored in `~/.cache/git-ca/default-model.path` or `.git-ca/default-model.path`
-- **Sampling parameters**: Temperature 0.2, Top-K 40, Top-P 0.9, Min-P 0.0
-
-## Common Development Tasks
-
-### Add a Feature
-1. **Architecture First**: Keep new logic scoped to `src/main.rs` or `src/llama.rs` until the surface area justifies extracting a module
-2. **Unit Tests**: Add inline tests in `#[cfg(test)]` modules beside the code they cover
-3. **Integration Tests**: Multi-step workflows combining Git operations + model inference should be promoted to a `tests/` directory
-4. **Verify**: Run `cargo fmt && cargo clippy -- -D warnings && cargo test`
-5. **Manual Testing**: Use `cargo run -- git ca` in a test repo with staged changes and document output in PR description
-6. **Documentation**: Update `README*.md`, `DEPLOY.md`, and `CLAUDE.md` when behavior changes
-
-### Modify Model Handling
-- Update `LlamaSession` in `src/llama.rs` for inference logic
-- Adjust sampling parameters (lines 19-22 in `llama.rs`)
-- Modify `generate_fallback_commit_message` in `src/main.rs` for different deterministic logic
-- Update `DEFAULT_MODEL_REPO` if changing defaults
-
-### Adjust Prompts
-- `build_commit_prompt()` (lines 421-488) - update prompt instructions
-- `build_diff_summary()` (lines 784-919) - change how diffs are summarized
-- Update translated READMEs accordingly
-
-### Debug Model Issues
-- Run `git ca doctor` to test model loading and inference
-- Use `debug_model_response()` (lines 398-400) to log model output
-- Check `analyze_diff()` retry logic (lines 490-544)
-- Verify context size handling (lines 157-163 in `llama.rs`)
-
-## Testing Guidelines
-
-**Unit Tests** (in `#[cfg(test)]` at bottom of `main.rs`):
-- `handles_extracts_subject_line` - Response parsing
-- `handles_includes_body_until_instruction` - Body extraction
-- `validates_git_flow_subject` - Validation logic
-- `fallback_generates_for_*` - Fallback behavior
-- `truncates_diff_for_prompt` - Diff summarization
-
-**Integration Testing**:
-- No `tests/` directory currently
-- Use `cargo run -- git ca` against real repositories
-- Test edge cases: empty diffs, very large diffs, generated files
-- Verify fallback triggers: model errors, invalid output, empty responses
-
-## Error Handling
-
-- **Model Loading**: Returns descriptive errors if GGUF file missing or invalid
-- **Tokenization**: Buffer resizing handles oversized prompts
-- **Inference**: KV cache clearing between runs, chunked decoding with fallback
-- **Validation**: Retry loop (2 attempts) before falling back to deterministic generation
-- **Git Operations**: Propagates `git2::Error` with context
+  - Model loading and context setup
+  - Prompt processing and text generation
+  - Chunked prompt decoding
+  - Token sampling with temperature/top-k/top-p
+  - Detokenization
 
 ## Development Commands
 
@@ -178,30 +129,33 @@ cargo run -- git ca doctor
 
 # Select or download model
 cargo run -- git ca model
-cargo run -- git ca model pull marzoukbaig14/committed-gguf-0.6b
+cargo run -- git ca model pull default
 
 # Release build
 cargo build --release
+
+# Run a single test
+cargo test handles_extracts_subject_line
 ```
 
-## Distribution
+## Configuration
 
-- Release binaries: `cargo build --release` produces optimized binary
-- **Homebrew**: Formula at `git-ca.rb` with version and SHA256
-- **Installer**: `install-git-ca.sh` for automated setup
-- Documentation: `README.md`, `README_ZH.md`, `README_FR.md`, `README_ES.md`
-- Keep `README.md` / `DEPLOY.md` / `INSTALL.md` in sync with code changes
+- `commit-analyzer.model-tier` — `small` | `default` | `quality` (optional; auto from RAM when unset)
+- `commit-analyzer.context` — Override llama context tokens (clamped by RAM heuristics)
+- **Llama context length**: Adaptive (typically 4096 / 8192 / 16384 by tier + RAM)
+- **Model persistence**: Paths stored in `~/.cache/git-ca/default-model.path` or `.git-ca/default-model.path`
+- **Sampling parameters**: Temperature 0.2, Top-K 40, Top-P 0.9, Min-P 0.0
 
 ## Critical Implementation Details
 
-**Diff Summarization Strategy** (`build_diff_summary`):
-1. Identifies generated/large files (lockfiles, minified JS/CSS)
-2. Extracts file metadata: additions, deletions, file type
-3. Includes code snippets up to 120 lines or 1200 characters per file
-4. Truncates when approaching context limit (3× context - 512 chars)
-5. Marks omitted content with notices
+**Diff Summarization Strategy** (hierarchical):
+1. L0 inventory of every changed path with +/- counts (always first)
+2. Marks generated/large files (lockfiles, minified JS/CSS, source maps) as content-omitted
+3. L1 packs high-signal lines (hunk headers, signatures, API/error-ish changes)
+4. L2 fills remaining budget from high-churn files
+5. Char budget ≈ `(context - 384) * 3`, sorted by churn so multi-file commits stay useful
 
-**Model Sampling** (`sample_next_token`):
+**Model Sampling**:
 1. Retrieves logits from llama.cpp
 2. Applies temperature scaling
 3. Filters to top-K candidates
@@ -210,9 +164,10 @@ cargo build --release
 6. Prevents EOS tokens until meaningful text generated
 
 **Context Management**:
-- Fixed 4096-token context window
+- Adaptive context (tier + RAM; overridable via git config)
+- Batch size capped at 512 for low-end memory safety
 - Prompts truncated if exceeding `n_ctx - 32`
-- Raw diff tail used as fallback variant
+- Retry uses tighter L0+L1 hierarchy (or raw tail)
 - KV cache cleared between inferences
 
 ## Architecture Decisions
@@ -225,6 +180,29 @@ cargo build --release
 - **No Async**: Simple synchronous execution pattern
 - **Minimal Modules**: Resist premature abstraction - keep logic in `main.rs`/`llama.rs` until justified
 - **Generated Assets**: Keep under `target/` or other ignored directories - never in `src/` or `tests/`
+
+## Testing Guidelines
+
+**Unit Tests** (in `#[cfg(test)]` at bottom of `main.rs`):
+- `handles_extracts_subject_line` - Response parsing
+- `handles_includes_body_until_instruction` - Body extraction
+- `validates_conventional_commit_subject` - Validation logic
+- `fallback_generates_for_*` - Fallback behavior
+- `truncates_diff_for_prompt` - Diff summarization
+
+**Integration Testing**:
+- No `tests/` directory currently
+- Use `cargo run -- git ca` against real repositories
+- Test edge cases: empty diffs, very large diffs, generated files
+- Verify fallback triggers: model errors, invalid output, empty responses
+
+## Error Handling
+
+- **Model Loading**: Returns descriptive errors if GGUF file missing or invalid
+- **Tokenization**: Buffer resizing handles oversized prompts
+- **Inference**: KV cache clearing between runs, chunked decoding with fallback
+- **Validation**: Retry loop (2 attempts) before falling back to deterministic generation
+- **Git Operations**: Propagates `git2::Error` with context
 
 ## Performance Considerations
 
@@ -264,3 +242,12 @@ cargo build --release
 - Test both model generation and fallback paths (stage deps-only diffs, runtime changes)
 - Update `README*.md`, `DEPLOY.md`, and `CLAUDE.md` when behavior changes
 - Document manual `git ca` verification steps in PR descriptions
+
+## Related Documentation
+
+- `README.md` - Project overview and installation
+- `AGENTS.md` - Repository guidelines for contributors
+- `DEPLOY.md` - Release process and distribution
+- `HOMEBREW.md` - Homebrew formula management
+- `INSTALL.md` - Installation methods
+- `QUICK_START.md` - Quick start guide

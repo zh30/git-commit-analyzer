@@ -6,7 +6,7 @@ Git Commit Analyzer ships as a single Rust binary (`git-ca`) that integrates wit
 - Git 2.30 or later
 - Rust toolchain (stable channel) with `cargo`
 - Build prerequisites for llama.cpp (`cmake`, `make`, C/C++ compiler, GPU drivers as needed)
-- A local GGUF model (the CLI can download `marzoukbaig14/committed-gguf-0.6b` automatically)
+- A local GGUF model (the CLI can auto-download `marzoukbaig14/committed-gguf-0.6b` from Hugging Face)
 
 ## 2. Manual Installation
 
@@ -53,13 +53,14 @@ git add <files>
 git ca
 ```
 
-On initial launch the CLI scans common directories (`./models`, `~/Library/Application Support/git-ca/models`, `~/.cache/git-ca/models`) for GGUF models. If none are found it can download the default model from Hugging Face and cache it locally.
+On initial launch the CLI probes system memory, recommends a model tier (`small` / `default` / `quality`), scans common directories for GGUF models, and downloads a Q4 model if none are found.
 
 ### Additional configuration
 
-- `git ca model` — interactive model selector (persisted for future runs)
+- `git ca model` — interactive tier + local model selector (persisted for future runs)
+- `git ca model pull [small|default|quality|<repo>]` — download a tier or custom HF GGUF
 - Non-interactive runs reuse the saved model or fall back to the first detected GGUF.
-- Llama context window is fixed at 4096 tokens
+- Context length is adaptive (typically 4K–16K); override with `commit-analyzer.context`
 
 ## 6. Troubleshooting
 
@@ -73,9 +74,10 @@ On initial launch the CLI scans common directories (`./models`, `~/Library/Appli
 - On macOS install Xcode Command Line Tools (`xcode-select --install`).
 - On Linux install build essentials (`apt install build-essential cmake` or distro equivalent).
 
-### llama.cpp context errors
-- Context is fixed to 4096 tokens; trim large staged changes or use a smaller model.
-- Verify available GPU/CPU memory; large models may exceed device limits.
+### llama.cpp context / memory errors
+- Prefer a smaller tier (`git ca model pull small`) on low-RAM machines.
+- Lower context via `git config commit-analyzer.context 4096`.
+- Verify available GPU/CPU memory; larger tiers need more headroom.
 
 ### Command not found
 - Ensure `~/.git-plugins` (or chosen directory) is in PATH.
@@ -91,5 +93,5 @@ git config --global --unset commit-analyzer.language 2>/dev/null
 
 ## 8. Support
 - Issues: <https://github.com/zh30/git-commit-analyzer/issues>
-- Default model: <https://huggingface.co/marzoukbaig14/committed-gguf-0.6b>
+- Default model: <https://huggingface.co/marzoukbaig14/committed-gguf-0.6b> (optional Qwen3 tiers: 0.6B / 1.7B / 4B)
 - llama.cpp documentation: <https://github.com/ggerganov/llama.cpp>

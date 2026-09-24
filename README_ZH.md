@@ -2,20 +2,22 @@
 
 [English](README.md) · [Français](README_FR.md) · [Español](README_ES.md)
 
-Git 提交分析器是一个基于 Rust 的 Git 插件，利用本地 llama.cpp 模型分析已暂存的 diff，并生成符合 Git Flow 规范的提交说明。CLI 会在提示前压缩冗长 diff，校验模型输出格式，并在必要时提供确定性的兜底提交信息。
+Git 提交分析器是一个基于 Rust 的 Git 插件，利用本地 llama.cpp 模型分析已暂存的 diff，并生成符合 Conventional Commits 规范的提交说明。CLI 会在提示前压缩冗长 diff，校验模型输出格式，并在必要时提供确定性的兜底提交信息。
 
 ## 功能特性
 
 - **本地推理**：通过 `llama_cpp_sys_2` 调用 GGUF 模型，无需远程 API。
-- **智能 diff 摘要**：锁文件、生成物等大文件仅展示概要，避免浪费 Token。
-- **Git Flow 校验**：严格要求 `<type>(<scope>): <subject>`，失败时自动重试或兜底。
+- **任务微调默认模型**：首次运行自动下载 `committed-0.6b`（专为 Conventional Commits 微调的 Qwen3-0.6B）；官方 Qwen3 档位仍可通过 `git ca model pull` 获取。
+- **自适应上下文**：按系统内存调整 llama.cpp 上下文窗口（4K–16K tokens）。
+- **分层 diff 打包**：多文件提交先给文件清单与关键签名，再按预算填充片段。
+- **Conventional Commits 校验**：GBNF 语法约束解码保证 `<type>(<scope>): <subject>` 格式，失败时自动重试或兜底。
 - **交互式 CLI**：支持直接使用、编辑或取消生成的提交说明。
 - **多平台支持**：macOS 预构建二进制包（Intel + Apple Silicon）。
 
 ## 环境要求
 
 - Git ≥ 2.30
-- 一个本地 GGUF 模型（CLI 可自动下载默认模型 `marzoukbaig14/committed-gguf-0.6b`）
+- 一个本地 GGUF 模型（CLI 可自动下载 `marzoukbaig14/committed-gguf-0.6b`）
 
 ## 安装方式
 
@@ -70,19 +72,22 @@ bash -c "$(curl -fsSL https://sh.zhanghe.dev/install-git-ca.sh)"
 
 首次运行 CLI 会执行以下步骤：
 
-1. **扫描模型** 在常用目录：
+1. **探测系统内存**以调整上下文窗口（4K–16K tokens）。
+
+2. **扫描模型** 在常用目录：
    - `./models`（项目目录）
    - `~/.cache/git-ca/models`（Linux/macOS）
    - `~/.local/share/git-ca/models`（Linux 备用）
    - `~/Library/Application Support/git-ca/models`（macOS）
 
-2. **自动下载默认模型**（如果未找到）：
-   - 从 Hugging Face 下载 `marzoukbaig14/committed-gguf-0.6b`
-   - 存储至 `~/.cache/git-ca/models/`
+3. **自动下载默认模型**（如果未找到）：`marzoukbaig14/committed-gguf-0.6b`（Q4_K_M，约 397MB，专为 Conventional Commits 微调的 Qwen3-0.6B）到 `~/.cache/git-ca/models/`。
 
-3. **交互式选择**（如果找到多个模型）：
+4. **交互式选择**（多模型 / 多档位时）：
    ```bash
-   git ca model  # 交互式模型选择器
+   git ca model              # 交互选择（档位 + 本地 GGUF）
+   git ca model pull         # 下载推荐的 Qwen3 档位
+   git ca model pull quality # 强制指定档位（small|default|quality）
+   git ca model pull <仓库>  # 拉取自定义 HF 仓库
    ```
 
 ## 使用说明
@@ -94,16 +99,24 @@ git ca
 
 每次调用的流程：
 
-1. 对已暂存 diff 进行摘要（大型文件仅展示概要）。
+1. 对已暂存 diff 做分层打包（文件清单 → 关键签名 → 补充片段），适配自适应上下文。
 2. llama.cpp 模型生成提交说明。
-3. 若输出不符合规范，使用更严格提示重试；仍失败则给出兜底信息。
+3. 若输出不符合规范，用更紧凑的 diff 视图 + 更严提示重试；仍失败则兜底。
 4. 交互式选择 **使用**、**编辑** 或 **取消**。
 
 ### 配置命令
 
-- `git ca model` — 交互式模型选择器
-- `git ca doctor` — 测试模型加载和推理
+- `git ca model` — 交互式模型 / 档位选择器
+- `git ca model pull [small|default|quality|<仓库>]` — 下载档位或自定义 HF 仓库
+- `git ca doctor` — 硬件概况 + 模型加载烟测
 - `git ca --version` — 显示版本信息
+
+可选 Git 配置：
+
+```bash
+git config --global commit-analyzer.model-tier default   # small | default | quality
+git config --global commit-analyzer.context 8192         # token 上下文长度
+```
 
 ## 开发指引
 
